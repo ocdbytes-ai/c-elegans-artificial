@@ -1,0 +1,80 @@
+# PPO hyperparameters.
+#
+# The tuning surface for ppo/config.py, which holds the schema, the defaults
+# and the reasoning. Every field is named here (tests/test_ppo.py enforces
+# that), but a file passed to the trainer may be partial.
+#
+# Parameter reference: notes/training.md section 10.
+
+network:
+  hidden_sizes: [128, 128]
+  activation: tanh
+  log_std_init: -0.5
+  # Floor on the policy std, clamped after every policy step. Sampling is the
+  # only exploration PPO has and the surrogate always prefers narrowing it, so
+  # an unfloored run collapsed sigma and its last 100 epochs learned nothing.
+  # Costs nothing at evaluation, which uses the mean. This floor has never
+  # demonstrably helped here — notes/training.md section 5. null disables it.
+  log_std_min: -1.6
+  # Initial bias per action dimension: [turn, throttle]. A zero-mean throttle
+  # cancels forward against backward, leaving an untrained worm diffusing
+  # rather than travelling, with no variation in outcome to learn from at any
+  # number of steps. 0.5 keeps the mean off the action bound so exploration
+  # noise is not half clipped away from step one. A prior, not a constraint:
+  # reversing remains learnable. null leaves the network's own init untouched.
+  mean_bias_init: [0.0, 0.5]
+
+rollout:
+  steps_per_epoch: 8000
+  epochs: 500
+  # The discount horizon 1/(1-gamma) must cover the lifespan, or eating moves
+  # V(s) too little to learn from. This is the single most consequential
+  # hyperparameter here — notes/training.md section 3.
+  gamma: 0.998
+  gae_lambda: 0.97
+  # Smell is one scalar: a single frame says "how much", never "more than
+  # before". Stacking is what supplies the time axis chemotaxis needs.
+  frame_stack: 4
+  # food_smell is far quieter than sin/cos spanning [-1, 1]; without this the
+  # signal that matters is the faintest input the network sees.
+  normalize_observations: true
+
+optim:
+  clip_ratio: 0.2
+  policy_lr: 0.0003
+  value_lr: 0.001
+  policy_iters: 80        # upper bound; target_kl usually stops it sooner
+  value_iters: 80
+  target_kl: 0.015
+  # Spinning Up's PPO has no entropy term — it computes entropy for logging
+  # only. Under a survival reward, freezing is a strong early attractor. The
+  # surrogate wins this negotiation regardless; see notes/training.md section
+  # 5. Set to 0.0 to match spinup exactly.
+  entropy_coef: 0.01
+  max_grad_norm: 0.5      # 0 disables clipping
+
+curriculum:
+  # Start forgiving and tighten toward the world in the env config, which
+  # supplies the END of each ramp; these are only the starts. null pins a
+  # parameter at its target. Anneal DOWN only — the food_smell observation
+  # ceiling is fixed at the starting count when the env is built.
+  # Rationale and measurements: notes/training.md section 8.
+  enabled: true
+  anneal_fraction: 0.8    # reach the real world 80% in, then hold and consolidate
+  food_count_start: 15
+  eat_radius_start: 1.5
+  scent_radius_start: 6.0
+  # Divides basal_cost AND move_cost at the start, annealing to 1.0, buying
+  # time to explore before existing becomes expensive. Scaling both together
+  # keeps basal dominating move, so freezing never becomes optimal. Bigger is
+  # not better: too easy a start is the same no-signal problem from the other
+  # end, and it pushes the payoff of eating past the gamma horizon.
+  metabolism_scale_start: 2.0
+
+run:
+  name: ppo
+  seed: 0
+  device: cpu             # networks this small are latency-bound; CPU usually wins
+  output_dir: experiments
+  save_every: 10
+  log_every: 1

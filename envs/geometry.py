@@ -1,9 +1,9 @@
 """Positions, distances and angles on a bounded 2D plane.
 
-The world is either a torus (``boundary="wrap"``) or a box with hard edges
-(``boundary="clamp"``). Everything that measures a distance has to agree on
-which one is in force, so all of it lives here — the worm, the scent field and
-the renderer all call into these helpers.
+The arena is either a torus (``boundary="wrap"``) or a box with hard edges
+(``boundary="clamp"``). Every distance measured anywhere in the project goes
+through these helpers so that the worm, the scent field and the renderer cannot
+disagree about which convention is in force.
 """
 
 from __future__ import annotations
@@ -12,14 +12,31 @@ import numpy as np
 
 
 def wrap_angle(theta: float | np.ndarray) -> float | np.ndarray:
-    """Fold an angle into [-pi, pi)."""
+    """Folds an angle into [-pi, pi).
+
+    Args:
+        theta: Angle in radians, scalar or array.
+
+    Returns:
+        The equivalent angle in [-pi, pi).
+    """
     return (np.asarray(theta) + np.pi) % (2 * np.pi) - np.pi
 
 
-def apply_boundary(
-    position: np.ndarray, size: tuple[float, float], boundary: str
-) -> np.ndarray:
-    """Keep a position inside the arena, wrapping or clamping as configured."""
+def apply_boundary(position: np.ndarray, size: tuple[float, float], boundary: str) -> np.ndarray:
+    """Keeps a position inside the arena.
+
+    Args:
+        position: Position to constrain, shape ``(2,)`` or ``(..., 2)``.
+        size: Arena ``(width, height)``.
+        boundary: Either ``"wrap"`` or ``"clamp"``.
+
+    Returns:
+        The constrained position, same shape as the input.
+
+    Raises:
+        ValueError: If ``boundary`` is not a known convention.
+    """
     extent = np.asarray(size, dtype=np.float64)
     if boundary == "wrap":
         return np.mod(position, extent)
@@ -34,11 +51,20 @@ def displacement(
     size: tuple[float, float],
     boundary: str,
 ) -> np.ndarray:
-    """Vector from ``origin`` to ``target``, broadcasting over leading axes.
+    """Computes the vector from origin to target, broadcasting over leading axes.
 
-    On a torus this is the *minimum image* convention: the shortest of the nine
-    equivalent copies of ``target``. Without it a pellet just across the seam
-    would read as maximally far away.
+    Under ``"wrap"`` this uses the minimum-image convention: the shortest of the
+    nine equivalent copies of ``target``. Without it, a pellet just across the
+    seam would read as maximally distant.
+
+    Args:
+        origin: Start position, shape ``(2,)`` or ``(..., 2)``.
+        target: End position, broadcastable against ``origin``.
+        size: Arena ``(width, height)``.
+        boundary: Either ``"wrap"`` or ``"clamp"``.
+
+    Returns:
+        Displacement vectors with the broadcast shape of the inputs.
     """
     delta = np.asarray(target, dtype=np.float64) - np.asarray(origin, dtype=np.float64)
     if boundary == "wrap":
@@ -53,12 +79,30 @@ def distance(
     size: tuple[float, float],
     boundary: str,
 ) -> np.ndarray:
-    """Euclidean distance under the same boundary convention."""
+    """Computes Euclidean distance under the arena's boundary convention.
+
+    Args:
+        origin: Start position, shape ``(2,)`` or ``(..., 2)``.
+        target: End position, broadcastable against ``origin``.
+        size: Arena ``(width, height)``.
+        boundary: Either ``"wrap"`` or ``"clamp"``.
+
+    Returns:
+        Distances with the broadcast shape of the inputs, minus the last axis.
+    """
     return np.linalg.norm(displacement(origin, target, size, boundary), axis=-1)
 
 
 def max_distance(size: tuple[float, float], boundary: str) -> float:
-    """Largest distance two points can be apart — used to normalise observations."""
+    """Returns the largest distance two points in the arena can be apart.
+
+    Args:
+        size: Arena ``(width, height)``.
+        boundary: Either ``"wrap"`` or ``"clamp"``.
+
+    Returns:
+        Half the diagonal on a torus, the full diagonal in a box.
+    """
     width, height = size
     if boundary == "wrap":
         return float(np.hypot(width / 2.0, height / 2.0))
@@ -66,7 +110,14 @@ def max_distance(size: tuple[float, float], boundary: str) -> float:
 
 
 def heading_vector(theta: float) -> np.ndarray:
-    """Unit vector pointing along a heading."""
+    """Returns the unit vector pointing along a heading.
+
+    Args:
+        theta: Heading in radians.
+
+    Returns:
+        ``[cos(theta), sin(theta)]``.
+    """
     return np.array([np.cos(theta), np.sin(theta)], dtype=np.float64)
 
 
@@ -79,10 +130,22 @@ def sample_positions(
     min_distance: float = 0.0,
     max_attempts: int = 32,
 ) -> np.ndarray:
-    """Uniformly sample ``count`` positions, optionally away from ``exclude``.
+    """Samples positions uniformly, optionally keeping clear of a point.
 
-    Rejection sampling with a bounded attempt count: a config asking for an
-    impossible clearance degrades to "as far as we got" rather than hanging.
+    Uses rejection sampling with a bounded attempt count, so a config demanding
+    an impossible clearance degrades to a best effort rather than hanging.
+
+    Args:
+        rng: Source of randomness.
+        count: Number of positions to draw.
+        size: Arena ``(width, height)``.
+        boundary: Either ``"wrap"`` or ``"clamp"``.
+        exclude: Position to stay away from, or None for no exclusion.
+        min_distance: Required clearance from ``exclude``.
+        max_attempts: Rejection-sampling rounds before giving up.
+
+    Returns:
+        Positions of shape ``(count, 2)``.
     """
     extent = np.asarray(size, dtype=np.float64)
     positions = rng.uniform(0.0, extent, size=(count, 2))

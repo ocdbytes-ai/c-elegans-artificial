@@ -1,12 +1,13 @@
-"""The Gymnasium environment: a worm that has to eat to keep existing.
+"""The Gymnasium environment: a worm that must eat to keep existing.
 
 A point body on a continuous plane, pellets that emit a scent field, and a
-metabolism. The only reward is ``+1`` for each step survived; foraging has to
-emerge from that.
-The env itself is deliberately thin. It owns the RNG and the step ordering and
-delegates everything else: :mod:`envs.worm` moves the body, :mod:`envs.food`
-owns pellets and scent, :mod:`envs.metabolism` owns energy, and
-:mod:`envs.observations` decides what any of that looks like to the policy.
+metabolism. The only reward is ``+1`` per step survived, so foraging has to
+emerge rather than being rewarded directly.
+
+The environment is deliberately thin. It owns the RNG and the step ordering and
+delegates the rest: :mod:`envs.worm` moves the body, :mod:`envs.food` owns
+pellets and scent, :mod:`envs.metabolism` owns energy, and
+:mod:`envs.observations` decides what any of it looks like to the policy.
 """
 
 from __future__ import annotations
@@ -22,33 +23,37 @@ from .config import EnvConfig
 from .food import FoodField
 from .metabolism import Metabolism
 from .observations import ObservationBuilder, Sensors
+from .step_info import StepInfo
 from .worm import Worm
 
 
 class WormWorldEnv(gym.Env):
-    """A worm that must find food.
+    """A worm that must find food to survive.
 
-    Action space: ``Box(-1, 1, (2,))`` — ``[turn, throttle]``. Both are
-    fractions of the configured maxima; throttle may be negative (worms reverse).
-    
-    Box(-1, 1, (2,)) means our policy gives two outputs :
-    - Turn (+1 -> left, -1 -> right, 0 -> hold heading) 
-    - Throttle (+1 -> forward, -1 -> backward)
-    Each value can be in range [-1, 1]
+    The action is ``Box(-1, 1, (2,))`` holding ``[turn, throttle]``, each a
+    fraction of the corresponding configured ceiling. Positive turn is
+    anticlockwise, zero holds the heading; negative throttle reverses, which
+    real *C. elegans* does as part of the pirouette.
 
-    Observation space: ``[energy, food_smell, heading_sin, heading_cos]`` —
-    see :mod:`envs.observations`, and ``env.unwrapped.observation_labels`` for
-    the live layout.
+    The observation is set by ``config.observation``; read
+    ``env.unwrapped.observation_labels`` for the live layout.
 
-    Episodes end on death (``terminated``). There is no built-in step cap
-    truncation comes from the ``max_episode_steps`` in the registration, i.e.
-    from Gymnasium's ``TimeLimit`` wrapper, so that death and timeout stay
-    distinguishable (PPO needs to bootstrap differently for each).
+    Episodes end on death via ``terminated``. There is no built-in step cap:
+    truncation comes from ``max_episode_steps`` in the registration, so death
+    and timeout stay distinguishable. PPO must bootstrap differently for each.
+
+    Attributes:
+        config: The resolved environment config.
+        worm: The body.
+        food: Pellets and the scent field.
+        metabolism: Energy state.
+        steps: Steps taken this episode.
+        render_mode: One of ``metadata["render_modes"]``, or None.
     """
 
-    # Class-level on purpose: gym.make() reads this off the class, before any
+    # Class-level deliberately: gym.make() reads this off the class before any
     # instance exists, to decide whether to auto-apply HumanRendering. __init__
-    # then replaces it per instance so render_fps reflects the actual config.
+    # replaces it per instance so render_fps reflects the actual config.
     metadata: ClassVar[dict[str, Any]] = {
         "render_modes": ["human", "rgb_array"],
         "render_fps": 30,
@@ -59,6 +64,16 @@ class WormWorldEnv(gym.Env):
         config: EnvConfig | dict[str, Any] | str | Path | None = None,
         render_mode: str | None = None,
     ):
+        """Builds the world.
+
+        Args:
+            config: An :class:`~envs.config.EnvConfig`, a nested dict, a path to
+                a YAML file, or None for the defaults.
+            render_mode: ``"human"``, ``"rgb_array"``, or None to disable.
+
+        Raises:
+            ValueError: If ``render_mode`` is not supported.
+        """
         super().__init__()
         self.config = EnvConfig.resolve(config)
 
@@ -67,8 +82,8 @@ class WormWorldEnv(gym.Env):
         self.render_mode = render_mode
         self.metadata = {**self.metadata, "render_fps": self.config.render.fps}
 
-        self.worm = Worm(self.config.worm, self.config.world)
-        self.food = FoodField(self.config.food, self.config.world)
+        self.worm = Worm(self.config.worm, self.config.world, self.config.randomization)
+        self.food = FoodField(self.config.food, self.config.world, self.config.randomization)
         self.metabolism = Metabolism(self.config.metabolism)
         self._observation = ObservationBuilder(self.config)
         self._renderer: Any | None = None
@@ -84,7 +99,16 @@ class WormWorldEnv(gym.Env):
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[np.ndarray, dict[str, Any]]:
+    ) -> tuple[np.ndarray, StepInfo]:
+        """Starts a new episode with a fresh body, world and energy.
+
+        Args:
+            seed: Seeds the environment's RNG when given.
+            options: Unused; present for the Gymnasium API.
+
+        Returns:
+            The first observation and its diagnostics.
+        """
         super().reset(seed=seed)
         self.worm.reset(self.np_random)
         self.food.reset(self.np_random, self.worm.position)
@@ -96,11 +120,20 @@ class WormWorldEnv(gym.Env):
             self.render()
         return observation, self._info(eaten=0, moved=0.0)
 
-    def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+    def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, StepInfo]:
+        """Advances the simulation by one step.
+
+        Args:
+            action: ``[turn, throttle]``; values outside ``[-1, 1]`` are clipped.
+
+        Returns:
+            The Gymnasium 5-tuple. Truncation is always False here and is
+            supplied by the ``TimeLimit`` wrapper from the registration.
+        """
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
 
-        # Pay first, move second: the cost of an action is charged whether or
-        # not the worm has the energy left to complete it.
+        # Pay first, move second: an action costs energy whether or not the worm
+        # has enough left to complete it.
         self.metabolism.spend(action)
         move = self.worm.step(action, speed_factor=self.metabolism.speed_factor)
         eaten = self.food.consume(self.worm.position, self.np_random)
@@ -118,6 +151,11 @@ class WormWorldEnv(gym.Env):
         return observation, float(reward), terminated, False, self._info(eaten, move.distance)
 
     def render(self) -> np.ndarray | None:
+        """Draws the current frame.
+
+        Returns:
+            An RGB array under ``"rgb_array"``, otherwise None.
+        """
         if self.render_mode is None:
             gym.logger.warn("render() called with render_mode=None; nothing to draw")
             return None
@@ -128,18 +166,27 @@ class WormWorldEnv(gym.Env):
         return self._renderer.draw(self.worm, self.food, self.metabolism, self.steps)
 
     def close(self) -> None:
+        """Releases the renderer and any window it owns."""
         if self._renderer is not None:
             self._renderer.close()
             self._renderer = None
 
     def _observe(self) -> np.ndarray:
+        """Reads the current observation."""
         return self._observation(Sensors(self.worm, self.food, self.metabolism))
 
-    def _info(self, eaten: int, moved: float) -> dict[str, Any]:
-        """Diagnostics only — the agent optimises the scalar reward alone.
+    def _info(self, eaten: int, moved: float) -> StepInfo:
+        """Assembles the per-step diagnostics.
 
-        Energy in vs. out is logged separately here so that a worm that is
-        starving and a worm that is over-exerting look different in the logs.
+        Diagnostics only; the agent optimises the scalar reward alone. See
+        :mod:`envs.step_info` for the field contract.
+
+        Args:
+            eaten: Pellets eaten this step.
+            moved: World units actually travelled this step.
+
+        Returns:
+            The populated info dict.
         """
         ledger = self.metabolism.ledger
         _, _, food_distance = self.food.nearest(self.worm.position)
@@ -156,6 +203,10 @@ class WormWorldEnv(gym.Env):
             "food_smell": float(self.food.scent_at(self.worm.position)),
             "nearest_food_distance": food_distance,
             "distance_moved": moved,
+            "touch": self.worm.blocked,
             "position": self.worm.position.copy(),
             "heading": self.worm.heading,
+            "max_speed": self.worm.max_speed,
+            "max_turn_rate": self.worm.max_turn_rate,
+            "food_count": self.food.count,
         }

@@ -1,58 +1,101 @@
-# World v1 — point-worm, random food, scent field.
+# World v1 — point worm, random food, scent field.
 #
-# This file is the complete set of tunables and mirrors the dataclass defaults
-# in envs/config.py exactly (tests/test_env.py enforces that they stay in sync).
-# Any YAML passed to the env may be partial — omitted keys fall back to these.
+# The tuning surface for envs/config.py, which holds the schema, the defaults
+# and the reasoning. Every field is named here (tests/test_env.py enforces
+# that), but a YAML passed to the env may be partial:
 #
 #   env = WormWorldEnv(config="configs/world_v1.yaml")
+#
+# Parameter reference: notes/training.md section 10.
 
 world:
   width: 20.0
   height: 20.0
-  dt: 0.1
-  # "wrap" = torus, no walls to get stuck against. "clamp" = hard edges.
-  boundary: wrap
+  dt: 0.1                 # seconds of simulated time per step
+  # "wrap" is a torus, where straight-line sweeping forages without sensing;
+  # "clamp" has walls, which the touch channel exists to perceive. See
+  # notes/training.md section 7.
+  boundary: clamp
 
 worm:
   max_speed: 2.0          # world units / second
-  max_turn_rate: 3.0      # radians / second (~172 deg/s)
-  allow_reverse: true     # C. elegans reverses; part of the pirouette
-  radius: 0.25            # drawn size only
+  max_turn_rate: 3.0      # radians / second
+  allow_reverse: true
+  # Drawn size only — read by the renderer and nothing else; eating uses
+  # food.eat_radius. This is the body's half-width at its thickest, so the
+  # drawn worm is 2 * radius across against render.worm_body_length long.
+  radius: 0.08
+
+randomization:
+  # Multipliers on the nominal values above, redrawn every reset. The worm is
+  # never told what it drew, so no policy can bake in one exact calibration.
+  # Set enabled: false for fixed dynamics, e.g. when isolating a bug.
+  enabled: true
+  speed_scale: [0.75, 1.25]
+  turn_rate_scale: [0.75, 1.25]
+  # Unlike the actuation draws this one is sensable — a denser world smells
+  # stronger everywhere — so scarcity can be searched for differently.
+  food_count_scale: [0.5, 1.5]
 
 food:
-  count: 8
-  eat_radius: 0.4         # contact radius — touch it and it is eaten
-  scent_radius: 4.0       # sensory radius — 10x the mouth, so it can be followed
-  scent_peak: 1.0         # concentration at the exact centre of a pellet
+  count: 12
+  eat_radius: 1.0         # contact radius; touch a pellet and it is eaten
+  scent_radius: 4.0       # sensory radius; must exceed eat_radius to be followable
+  scent_peak: 1.0         # concentration at a pellet's exact centre
   scent_profile: gaussian # gaussian | linear | inverse_square
-  gaussian_sigma_scale: 0.35  # sigma = 0.35 * scent_radius -> ~1.7% of peak at the rim
+  gaussian_sigma_scale: 0.35  # sigma as a fraction of scent_radius
+  # Eaten pellets reappear elsewhere, holding density constant. False depletes
+  # the world and caps lifespan regardless of policy.
   respawn_on_eat: true
-  min_spawn_distance: 5.0 # do not spawn a pellet in the worm's mouth
+  # Clearance kept between a new pellet and the worm, at reset and on respawn.
+  # Judge it against the scent sigma (gaussian_sigma_scale * scent_radius),
+  # not against eat_radius: past ~2 sigma the worm both starts every episode
+  # outside its own sensory range and respawns each meal out of range, which
+  # turns every episode's opening into a blind walk. See notes/training.md
+  # section 7. At 2.0 this is ~1.4 sigma, still twice eat_radius.
+  min_spawn_distance: 2.0
 
 metabolism:
   max_energy: 100.0
-  initial_energy: 50.0
-  # THE critical ratio. basal must dominate move, or freezing wins and PPO
-  # stops exploring. Here: idle 0.25/step, full-effort 0.29/step (+16%).
-  basal_cost: 0.25
-  move_cost: 0.02         # multiplied by |action|^2, so at most 0.04
-  food_value: 25.0        # one pellet buys 100 idle steps
+  initial_energy: 60.0
+  # THE critical ratio: basal must dominate move, or freezing outlives foraging
+  # and training converges there. initial_energy / basal_cost is the freeze
+  # baseline every policy has to beat — notes/training.md section 7.
+  basal_cost: 0.20
+  move_cost: 0.02         # multiplied by |action|^2
+  food_value: 25.0
   min_speed_factor: 0.35  # a starving worm is slow, never frozen
-  speed_knee: 0.25        # above 25% energy, speed is unimpaired
+  speed_knee: 0.25        # above this energy fraction, speed is unimpaired
 
 reward:
   survival: 1.0           # +1 per surviving step. This is the whole reward.
-  death_penalty: 0.0      # optional sharpening; keep at 0 for the headline run
+  death_penalty: 0.0      # advantage normalisation removes it exactly; keep at 0
 
 observation:
-  # Food is sensed as one scalar concentration at the head — never as a
-  # direction or a distance. Stack frames on top to give it a time axis:
-  #   FrameStackObservation(gym.make("WormWorld-v1"), stack_size=4)
   include_energy: true
+  # Mechanosensation. Under boundary: clamp a wall is otherwise invisible — the
+  # worm cannot tell it has stopped moving, so it cannot learn to turn away.
+  # Constant 0 under wrap.
+  include_touch: true
 
 render:
   window_size: 700
   fps: 30
-  show_scent_field: true
-  scent_grid: 96
-  show_scent_rings: true
+  # Draw what the simulation actually uses: pellets at their true eat_radius,
+  # contours on, and a ring on the point the physics integrates. Overrides
+  # show_scent_field and food_dot_scale. Scripts take --debug for this.
+  debug: false
+  # Dotted iso-concentration rings, one per halving of concentration, so they
+  # crowd where the gradient is steep. Off in the clean look: they clutter the
+  # frame, and being per-pellet they cannot show the merged summits that
+  # matter. The two settings below only take effect when this is true.
+  show_scent_field: false
+  scent_contours: 3
+  contour_dot_spacing: 14.0
+  food_dot_scale: 0.3     # clean-look pellet disc, as a fraction of eat_radius
+  # The drawn body, which is decoration over a point-mass simulation — none of
+  # this reaches the physics or the observation. The wave is locked to the path
+  # the point actually travelled, so the worm is still when it is still.
+  worm_body_length: 2.5   # world units, trailing back from the simulated point
+  worm_wave_amplitude: 0.35  # peak lateral swing; 0 draws it straight
+  worm_wavelength: 1.6    # undulation wavelength along the body

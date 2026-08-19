@@ -14,9 +14,11 @@ import numpy as np
 import pytest
 from gymnasium.utils.env_checker import check_env
 
-import envs  # noqa: F401  (registers the ids)
+import envs
 from envs import geometry
 from envs.config import EnvConfig
+from envs.episodes import run_episodes
+from envs.step_info import StepInfo
 from envs.worm_world import WormWorldEnv
 
 CONFIG_DIR = "configs"
@@ -32,7 +34,7 @@ def test_passes_gymnasium_env_checker():
 
 
 def test_registered_id_runs():
-    env = gym.make("WormWorld-v1")
+    env = gym.make(envs.ENV_ID)
     observation, _info = env.reset(seed=0)
     assert env.observation_space.contains(observation)
     for _ in range(50):
@@ -43,17 +45,84 @@ def test_registered_id_runs():
     env.close()
 
 
-def test_observation_is_smell_only():
+FULL_OBSERVATION = ["energy", "food_smell", "touch", "heading_sin", "heading_cos"]
+
+
+def test_food_is_sensed_only_as_smell():
     env = WormWorldEnv()
-    assert env.observation_labels == ["energy", "food_smell", "heading_sin", "heading_cos"]
+    assert env.observation_labels == FULL_OBSERVATION
     # The worm must never be handed a direction or a distance to food.
-    assert not any("dx" in label or "dy" in label or "dist" in label for label in env.observation_labels)
+    assert not any(
+        "dx" in label or "dy" in label or "dist" in label for label in env.observation_labels
+    )
 
 
-def test_energy_channel_can_be_ablated():
+def test_channels_can_be_ablated():
     env = WormWorldEnv(config={"observation": {"include_energy": False}})
-    assert env.observation_labels == ["food_smell", "heading_sin", "heading_cos"]
-    assert env.observation_space.shape == (3,)
+    assert env.observation_labels == ["food_smell", "touch", "heading_sin", "heading_cos"]
+    assert env.observation_space.shape == (4,)
+
+    env = WormWorldEnv(config={"observation": {"include_touch": False}})
+    assert env.observation_labels == ["energy", "food_smell", "heading_sin", "heading_cos"]
+    assert env.observation_space.shape == (4,)
+
+
+# -- mechanosensation ------------------------------------------------------
+
+
+def _touch_of(env) -> float:
+    return env._observe()[env.observation_labels.index("touch")]
+
+
+def _walled_env() -> WormWorldEnv:
+    """Walls exist only under `clamp` — the dataclass default is `wrap`."""
+    env = WormWorldEnv(
+        config={"world": {"boundary": "clamp"}, "randomization": {"enabled": False}}
+    )
+    env.reset(seed=0)
+    return env
+
+
+def test_open_water_registers_no_touch():
+    env = _walled_env()
+    env.worm.position[:] = [10.0, 10.0]
+    env.worm.heading = 0.0
+    _, _, _, _, info = env.step(np.array([0.0, 1.0], dtype=np.float32))
+    assert info["touch"] == 0.0
+    assert _touch_of(env) == 0.0
+
+
+def test_swimming_into_a_wall_registers_touch():
+    """The signal that makes a wall learnable instead of invisible."""
+    env = _walled_env()
+    env.worm.position[:] = [env.config.world.width, 10.0]  # against the east wall
+    env.worm.heading = 0.0  # pushing straight into it
+
+    _, _, _, _, info = env.step(np.array([0.0, 1.0], dtype=np.float32))
+    assert info["touch"] == pytest.approx(1.0), "head-on into a wall is fully blocked"
+    assert _touch_of(env) == pytest.approx(1.0)
+
+
+def test_sliding_along_a_wall_registers_partial_touch():
+    env = _walled_env()
+    env.worm.position[:] = [env.config.world.width, 10.0]
+    env.worm.heading = np.pi / 4  # 45 degrees: one component blocked, one free
+
+    env.step(np.array([0.0, 1.0], dtype=np.float32))
+    touch = _touch_of(env)
+    assert 0.0 < touch < 1.0, f"a glancing collision is partial, got {touch}"
+
+
+def test_wrap_worlds_never_register_touch():
+    """There is nothing to collide with on a torus, seam crossings included."""
+    env = WormWorldEnv(config={"world": {"boundary": "wrap"}, "randomization": {"enabled": False}})
+    env.reset(seed=0)
+    env.worm.position[:] = [env.config.world.width - 0.01, 10.0]
+    env.worm.heading = 0.0  # about to cross the seam
+
+    for _ in range(20):
+        _, _, _, _, info = env.step(np.array([0.0, 1.0], dtype=np.float32))
+        assert info["touch"] == 0.0, "crossing the seam is not a collision"
 
 
 def test_same_seed_gives_identical_trajectories():
@@ -70,12 +139,41 @@ def test_same_seed_gives_identical_trajectories():
     np.testing.assert_array_equal(rollout(), rollout())
 
 
+def test_info_dict_matches_the_declared_contract():
+    """StepInfo is not enforced at runtime, so assert the real keys against it.
+
+    This is what turns renaming an info field into a test failure instead of a
+    KeyError halfway through a rollout, since the consumer
+    (envs.episodes.EpisodeAccumulator) reads these keys by name.
+    """
+    declared = set(StepInfo.__annotations__)
+    env = WormWorldEnv()
+
+    _, reset_info = env.reset(seed=0)
+    assert set(reset_info) == declared, "reset() info drifted from StepInfo"
+
+    _, _, _, _, step_info = env.step(np.zeros(2, dtype=np.float32))
+    assert set(step_info) == declared, "step() info drifted from StepInfo"
+    env.close()
+
+
+def test_episode_statistics_only_read_declared_fields():
+    """The consumer must not depend on a key the contract does not promise."""
+    consumed = {"energy_intake", "basal_cost", "move_cost", "distance_moved", "food_eaten_total"}
+    assert consumed <= set(StepInfo.__annotations__)
+
+    env = WormWorldEnv()
+    stats = run_episodes(env, lambda _obs: np.zeros(2, dtype=np.float32), episodes=2, seed=0)
+    env.close()
+    assert len(stats.episodes) == 2
+    assert all(episode.died for episode in stats.episodes)
+
+
 # -- config ----------------------------------------------------------------
 
 
-def test_shipped_yaml_matches_dataclass_defaults():
-    """configs/world_v1.yaml is the documented mirror of the defaults."""
-    assert EnvConfig.from_yaml(f"{CONFIG_DIR}/world_v1.yaml") == EnvConfig()
+def test_shipped_yaml_documents_every_field(assert_yaml_covers_config):
+    assert_yaml_covers_config(f"{CONFIG_DIR}/world_v1.yaml", EnvConfig)
 
 
 def test_partial_config_overrides_only_what_it_names():
@@ -85,23 +183,122 @@ def test_partial_config_overrides_only_what_it_names():
     assert config.world == EnvConfig().world
 
 
-def test_unknown_config_key_is_an_error():
-    with pytest.raises(ValueError, match="unknown config key"):
-        EnvConfig.from_dict({"food": {"scent_radius": 5.0, "scnet_peak": 2.0}})
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"food": {"scent_radius": 5.0, "scnet_peak": 2.0}}, "unknown config key"),
+        ({"food": {"eat_radius": 9.0, "scent_radius": 4.0}}, "eat_radius must not exceed"),
+        ({"metabolism": {"initial_energy": 500.0}}, "initial_energy"),
+        ({"randomization": {"speed_scale": [1.5, 0.5]}}, "speed_scale low must not exceed high"),
+        ({"randomization": {"speed_scale": [0.0, 1.0]}}, "speed_scale low must be positive"),
+        ({"randomization": {"turn_rate_scale": 1.5}}, "turn_rate_scale must be a"),
+    ],
+)
+def test_bad_config_is_rejected(overrides, message):
+    with pytest.raises(ValueError, match=message):
+        EnvConfig.from_dict(overrides)
 
 
-def test_invalid_values_are_rejected():
-    with pytest.raises(ValueError, match="eat_radius must not exceed"):
-        EnvConfig.from_dict({"food": {"eat_radius": 9.0, "scent_radius": 4.0}})
-    with pytest.raises(ValueError, match="initial_energy"):
-        EnvConfig.from_dict({"metabolism": {"initial_energy": 500.0}})
+# -- domain randomisation --------------------------------------------------
+
+
+def _episode_actuations(env: WormWorldEnv, episodes: int = 30) -> np.ndarray:
+    return np.array(
+        [(env.reset(seed=i)[1]["max_speed"], env.reset(seed=i)[1]["max_turn_rate"])
+         for i in range(episodes)]
+    )
+
+
+def test_actuation_is_redrawn_each_episode():
+    env = WormWorldEnv()
+    draws = _episode_actuations(env)
+    assert len(np.unique(draws[:, 0])) > 1, "max_speed must vary between episodes"
+    assert len(np.unique(draws[:, 1])) > 1, "max_turn_rate must vary between episodes"
+
+
+def test_actuation_draws_stay_inside_the_configured_band():
+    env = WormWorldEnv()
+    cfg, rand = env.config.worm, env.config.randomization
+    draws = _episode_actuations(env)
+    assert np.all(draws[:, 0] >= cfg.max_speed * rand.speed_scale[0])
+    assert np.all(draws[:, 0] <= cfg.max_speed * rand.speed_scale[1])
+    assert np.all(draws[:, 1] >= cfg.max_turn_rate * rand.turn_rate_scale[0])
+    assert np.all(draws[:, 1] <= cfg.max_turn_rate * rand.turn_rate_scale[1])
+
+
+def test_randomisation_can_be_disabled():
+    env = WormWorldEnv(config={"randomization": {"enabled": False}})
+    draws = _episode_actuations(env, episodes=5)
+    assert np.all(draws[:, 0] == env.config.worm.max_speed)
+    assert np.all(draws[:, 1] == env.config.worm.max_turn_rate)
+    assert all(env.reset(seed=i)[1]["food_count"] == env.config.food.count for i in range(5))
+
+
+def test_food_count_is_redrawn_each_episode_within_bounds():
+    env = WormWorldEnv()
+    low, high = env.config.randomization.food_count_bounds(env.config.food.count)
+    counts = [env.reset(seed=i)[1]["food_count"] for i in range(40)]
+
+    assert len(set(counts)) > 1, "pellet count must vary between episodes"
+    assert min(counts) >= low and max(counts) <= high
+
+    drawn = env.reset(seed=0)[1]["food_count"]
+    assert len(env.food.positions) == drawn, "positions array must match the draw"
+
+
+def test_smell_bound_covers_the_richest_possible_episode():
+    """The space is fixed for the env's lifetime; a rich episode must still fit."""
+    env = WormWorldEnv()
+    _, max_count = env.config.randomization.food_count_bounds(env.config.food.count)
+    assert env.observation_space.high[1] == pytest.approx(
+        max_count * env.config.food.scent_peak
+    )
+
+    # Stack every pellet of the richest draw on the head: still inside the space.
+    seeds = (seed for seed in range(200) if env.reset(seed=seed)[1]["food_count"] == max_count)
+    assert next(seeds, None) is not None, f"no seed under 200 drew {max_count} pellets"
+    env.food.positions[:] = env.worm.position
+    observation = env.step(np.zeros(2, dtype=np.float32))[0]
+    assert env.observation_space.contains(observation)
+
+
+def test_actuation_draw_is_seeded():
+    """Randomisation must not cost reproducibility."""
+    first = WormWorldEnv().reset(seed=99)[1]
+    second = WormWorldEnv().reset(seed=99)[1]
+    assert first["max_speed"] == second["max_speed"]
+    assert first["max_turn_rate"] == second["max_turn_rate"]
+
+
+def test_randomisation_is_not_observable():
+    """The worm must not be handed its own calibration."""
+    env = WormWorldEnv()
+    assert env.observation_labels == FULL_OBSERVATION
+    assert env.observation_space.shape == (len(FULL_OBSERVATION),)
+
+
+def test_yaml_lists_become_validated_tuples():
+    config = EnvConfig.from_dict({"randomization": {"speed_scale": [0.5, 1.5]}})
+    assert config.randomization.speed_scale == (0.5, 1.5)
 
 
 # -- scent field -----------------------------------------------------------
 
 
+def _fixed_env(**food_overrides) -> WormWorldEnv:
+    """An env with randomisation off, for tests that pin pellets by hand.
+
+    Randomisation redraws the pellet count every reset, so anything that
+    assigns into ``food.positions`` has to opt out or the array size shifts
+    underneath it.
+    """
+    return WormWorldEnv(
+        config={"food": food_overrides, "randomization": {"enabled": False}}
+    )
+
+
 def _single_pellet_env(**food_overrides) -> WormWorldEnv:
-    env = WormWorldEnv(config={"food": {"count": 1, **food_overrides}})
+    env = _fixed_env(count=1, **food_overrides)
     env.reset(seed=3)
     return env
 
@@ -120,7 +317,7 @@ def test_scent_peaks_at_the_centre_and_decays_outward(profile):
 
 
 def test_scent_is_summed_over_pellets():
-    env = WormWorldEnv(config={"food": {"count": 2, "min_spawn_distance": 0.0}})
+    env = _fixed_env(count=2, min_spawn_distance=0.0)
     env.reset(seed=1)
     env.food.positions[:] = np.array([[10.0, 10.0], [10.5, 10.0]])
     midpoint = np.array([10.25, 10.0])
@@ -168,6 +365,41 @@ def test_eating_restores_energy_and_respawns_the_pellet():
     assert not np.array_equal(env.food.positions[0], before)
 
 
+def test_world_can_be_emptied_when_food_does_not_respawn():
+    """The env must stay steppable after the last pellet is gone."""
+    env = _fixed_env(count=2, min_spawn_distance=0.0, respawn_on_eat=False)
+    env.reset(seed=0)
+    assert env.food.count == 2
+
+    for expected in (1, 0):
+        env.food.positions[0] = env.worm.position.copy()
+        _, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
+        assert env.food.count == expected
+        assert info["food_count"] == expected
+
+    # Emptied. Stepping on must work, and the sensors must report honestly.
+    observation, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
+    assert env.observation_space.contains(observation)
+    assert info["food_smell"] == 0.0
+    assert info["nearest_food_distance"] == float("inf")
+    assert env.food.nearest(env.worm.position)[0] == -1
+
+
+def test_depleting_world_caps_lifespan_by_arithmetic():
+    env = _fixed_env(count=3, respawn_on_eat=False)
+    env.reset(seed=1)
+    metabolism = env.config.metabolism
+    cap = (metabolism.initial_energy + 3 * metabolism.food_value) / metabolism.basal_cost
+
+    steps = 0
+    while steps < cap + 50:
+        _, _, terminated, _, _ = env.step(np.zeros(2, dtype=np.float32))
+        steps += 1
+        if terminated:
+            break
+    assert terminated and steps <= cap, "nothing may outlive the food it can eat"
+
+
 def test_energy_is_capped_at_max():
     env = _single_pellet_env(min_spawn_distance=0.0)
     env.metabolism.energy = env.config.metabolism.max_energy
@@ -177,7 +409,7 @@ def test_energy_is_capped_at_max():
 
 
 def test_starvation_terminates_and_reward_counts_surviving_steps():
-    env = WormWorldEnv(config={"food": {"count": 1, "scent_radius": 0.5, "eat_radius": 0.01}})
+    env = _fixed_env(count=1, scent_radius=0.5, eat_radius=0.01)
     env.reset(seed=11)
     env.metabolism.energy = 3 * env.config.metabolism.basal_cost
 

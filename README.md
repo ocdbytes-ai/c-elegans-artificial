@@ -29,13 +29,14 @@ There are no hard coded scenarious everything the worm does is for survival.
 ## Docs 
 
 - [Biology](./notes/biology.md)
+- [Training](./notes/training.md)
 
 ## Checklist
 
 - [x] Biological Understading
 - [x] Environment Creation (Base Environment)
 - [ ] Train the behaviour
-    - [ ] Stage 1 : Food source sensory movement
+    - [x] Stage 1 : Food source sensory movement
     - [ ] Stage 2 : Other chemical stimulations (toxins, chemicals and other stuff)
     - [ ] Stage 3 : Train worm segmental body
     - [ ] Stage 4 : Figure out reproduction and population increamental dynamics
