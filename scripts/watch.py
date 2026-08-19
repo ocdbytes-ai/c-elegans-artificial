@@ -2,10 +2,16 @@
 
     uv run python scripts/watch.py experiments/ppo_s0/checkpoints/latest.pt
     uv run python scripts/watch.py <checkpoint> --episodes 20 --no-render
+    uv run python scripts/watch.py <checkpoint> --env-config configs/bigger.yaml
 
 The world is rebuilt from the config stored inside the checkpoint, not from
-``configs/`` — so what you watch is the world the policy actually trained in,
-even if the config files have moved on since.
+``configs/``, so what you watch is the world the policy actually trained in
+even if the config files have moved on since. ``--env-config`` is the way to
+override that deliberately: the file is merged over the stored config, so a
+YAML naming only what it changes leaves the rest of the trained world alone.
+
+Note that ``experiments/<run>/env.yaml`` is a record of a finished run, not an
+input. Nothing reads it back. Edit ``configs/`` and pass it here instead.
 """
 
 from __future__ import annotations
@@ -13,14 +19,43 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 import torch
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from envs import UNLIMITED_EPISODE_STEPS
 from envs.episodes import EpochStats, episode_line, run_episodes, summary_line
 from ppo import load_policy
+
+
+def describe_overrides(stored: dict, overrides: dict) -> list[str]:
+    """Lists the settings an override file actually changes.
+
+    Silently watching a policy in a world it never trained in is the failure
+    this exists to prevent, so what changed is printed rather than assumed.
+
+    Args:
+        stored: The env config saved inside the checkpoint.
+        overrides: Nested ``{section: {key: value}}`` to be merged over it.
+
+    Returns:
+        One ``section.key: old -> new`` line per genuine change.
+    """
+
+    def norm(value: Any) -> Any:
+        """YAML gives lists where the config holds tuples."""
+        return tuple(value) if isinstance(value, list) else value
+
+    changes = []
+    for section, values in overrides.items():
+        for key, value in (values or {}).items():
+            was = (stored.get(section) or {}).get(key)
+            if norm(was) != norm(value):
+                changes.append(f"    {section}.{key}: {was} -> {value}")
+    return changes
 
 
 def main() -> None:
@@ -53,16 +88,38 @@ def main() -> None:
         help="override the step cap per episode, or 0 to let a life run until "
         "the worm starves",
     )
+    parser.add_argument(
+        "--env-config",
+        default=None,
+        help="YAML merged over the world stored in the checkpoint; may name "
+        "only the settings it changes",
+    )
     args = parser.parse_args()
+
+    overrides: dict[str, Any] = {}
+    if args.env_config:
+        with open(args.env_config) as handle:
+            overrides = yaml.safe_load(handle) or {}
+    if args.debug:
+        overrides["render"] = {**overrides.get("render", {}), "debug": True}
 
     ac, env, state = load_policy(
         args.checkpoint,
         render_mode=None if args.no_render else "human",
-        env_overrides={"render": {"debug": True}} if args.debug else None,
+        env_overrides=overrides or None,
         max_episode_steps=(
             UNLIMITED_EPISODE_STEPS if args.max_steps == 0 else args.max_steps
         ),
     )
+
+    if args.env_config:
+        changes = describe_overrides(state["env_config"], overrides)
+        if changes:
+            print(f"world overridden from {args.env_config}, so this is NOT the")
+            print("world the policy trained in; scores are not comparable:")
+            print("\n".join(changes))
+        else:
+            print(f"{args.env_config} changes nothing about the stored world")
     print(
         f"epoch {state['epoch']}  ({state['total_steps']:,} env steps)  "
         f"{'stochastic' if args.stochastic else 'deterministic'}"
