@@ -30,7 +30,6 @@ import pygame
 from . import geometry
 from .config import EnvConfig
 from .food import FoodField
-from .metabolism import Metabolism
 from .scent import make_scent_profile
 from .worm import Worm
 
@@ -38,7 +37,6 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 CONTOUR_NEAR = 225  # grey of the innermost (strongest) scent ring
 CONTOUR_FAR = 55  # grey of the outermost (faintest) scent ring
-BAR_GREY = (60, 60, 60)  # empty part of the energy bar
 
 
 class PygameRenderer:
@@ -49,7 +47,6 @@ class PygameRenderer:
         render_mode: ``"human"`` or ``"rgb_array"``.
         scale: Pixels per world unit.
         size_px: Surface size in pixels.
-        font: HUD font.
         surface: Off-screen surface every frame is drawn onto.
         window: The display surface under ``"human"``, otherwise None.
         clock: Frame-rate limiter under ``"human"``, otherwise None.
@@ -71,8 +68,6 @@ class PygameRenderer:
         self.size_px = (round(world.width * self.scale), round(world.height * self.scale))
 
         pygame.init()
-        pygame.font.init()
-        self.font = pygame.font.Font(None, 22)
         self.surface = pygame.Surface(self.size_px)
         self.window: pygame.Surface | None = None
         self.clock: pygame.time.Clock | None = None
@@ -92,16 +87,15 @@ class PygameRenderer:
         self._last_head: np.ndarray | None = None
         self._phase = 0.0
 
-    def draw(
-        self, worm: Worm, food: FoodField, metabolism: Metabolism, steps: int
-    ) -> np.ndarray | None:
+    def draw(self, worm: Worm, food: FoodField) -> np.ndarray | None:
         """Renders one frame.
+
+        The counters live in the terminal now (:mod:`ppo.tui`), so nothing here
+        reads energy or step state and the window stays purely the world.
 
         Args:
             worm: The body to draw.
             food: Pellets and the scent field.
-            metabolism: Energy state, for the HUD bar.
-            steps: Step count, for the HUD.
 
         Returns:
             An RGB array under ``"rgb_array"``, otherwise None, including once
@@ -113,7 +107,6 @@ class PygameRenderer:
         self._draw_scent_field(food)
         self._draw_food(food)
         self._draw_worm(worm)
-        self._draw_hud(food, metabolism, steps)
 
         if self.render_mode == "human":
             assert self.window is not None and self.clock is not None
@@ -405,32 +398,3 @@ class PygameRenderer:
             # The body is decoration; this ring is the point the physics
             # integrates, which is what senses scent and what eats.
             pygame.draw.circle(self.surface, WHITE, self.to_screen(worm.position), 5, width=1)
-
-    def _draw_hud(self, food: FoodField, metabolism: Metabolism, steps: int) -> None:
-        """Draws the energy bar and text overlay.
-
-        Energy lives here because with no colour available the worm itself
-        cannot carry it.
-
-        Args:
-            food: The pellet field, for the eaten count.
-            metabolism: Energy state, for the bar.
-            steps: Step count.
-        """
-        bar_w, bar_h, margin = 180, 12, 12
-        pygame.draw.rect(self.surface, BLACK, (margin, margin, bar_w, bar_h))
-        pygame.draw.rect(
-            self.surface, WHITE, (margin, margin, round(bar_w * metabolism.energy_fraction), bar_h)
-        )
-        pygame.draw.rect(self.surface, BAR_GREY, (margin, margin, bar_w, bar_h), width=1)
-
-        lines = [
-            f"step {steps}",
-            f"energy {metabolism.energy:6.1f} / {self.config.metabolism.max_energy:.0f}",
-            f"eaten {food.eaten_total}",
-        ]
-        for i, line in enumerate(lines):
-            # Shadow first, so white text stays readable over a bright patch.
-            text_y = margin + bar_h + 6 + i * 20
-            self.surface.blit(self.font.render(line, True, BLACK), (margin + 1, text_y + 1))
-            self.surface.blit(self.font.render(line, True, WHITE), (margin, text_y))

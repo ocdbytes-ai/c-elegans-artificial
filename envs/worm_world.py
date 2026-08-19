@@ -163,7 +163,7 @@ class WormWorldEnv(gym.Env):
             from .rendering import PygameRenderer  # imported lazily: pygame is optional
 
             self._renderer = PygameRenderer(self.config, self.render_mode)
-        return self._renderer.draw(self.worm, self.food, self.metabolism, self.steps)
+        return self._renderer.draw(self.worm, self.food)
 
     @property
     def window_closed(self) -> bool:

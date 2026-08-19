@@ -26,6 +26,10 @@
 This repository is an experiment to create an artificial worm which can sense the environment and act accordingly.
 There are no hard coded scenarious everything the worm does is for survival.
 
+## Panel
+
+![Panel](./assets/panel.png)
+
 ## Docs 
 
 - [Biology](./notes/biology.md)

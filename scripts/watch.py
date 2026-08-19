@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from envs import UNLIMITED_EPISODE_STEPS
 from envs.episodes import EpochStats, episode_line, run_episodes, summary_line
 from ppo import load_policy
+from ppo.tui import ActorTUI
 
 
 def describe_overrides(stored: dict, overrides: dict) -> list[str]:
@@ -94,6 +95,11 @@ def main() -> None:
         help="YAML merged over the world stored in the checkpoint; may name "
         "only the settings it changes",
     )
+    parser.add_argument(
+        "--no-tui",
+        action="store_true",
+        help="do not draw the actor network in the terminal",
+    )
     args = parser.parse_args()
 
     overrides: dict[str, Any] = {}
@@ -129,16 +135,38 @@ def main() -> None:
     # run is ended by Ctrl-C or a closed window, and neither reaches a return.
     stats = EpochStats()
 
+    # The TUI owns the terminal while it runs, so per-episode lines are held
+    # back and printed once it has released the screen.
+    tui: ActorTUI | None = None
+    if not (args.no_render or args.no_tui):
+        world = env.unwrapped
+        tui = ActorTUI(world.observation_labels, state["ppo_config"]["rollout"]["frame_stack"])
+
     def report(index: int, episode) -> None:
         stats.add(episode)
-        print(episode_line(index, episode), flush=True)
+        if tui is None:
+            print(episode_line(index, episode), flush=True)
+
+    def policy(obs):
+        """Chooses an action, drawing the forward pass that produced it."""
+        tensor = torch.as_tensor(obs, dtype=torch.float32)
+        action = ac.act(tensor, deterministic=not args.stochastic)
+        if tui is not None:
+            world = env.unwrapped
+            tui.draw(
+                ac.pi,
+                tensor,
+                obs,
+                energy=(world.metabolism.energy, world.config.metabolism.max_energy),
+                eaten=world.food.eaten_total,
+                steps=world.steps,
+            )
+        return action
 
     try:
         run_episodes(
             env,
-            lambda obs: ac.act(
-                torch.as_tensor(obs, dtype=torch.float32), deterministic=not args.stochastic
-            ),
+            policy,
             episodes=args.episodes or None,
             seed=args.seed,
             on_episode=report,
@@ -146,11 +174,18 @@ def main() -> None:
         )
     except KeyboardInterrupt:
         print()
+    finally:
+        if tui is not None:
+            tui.stop()
     env.close()
 
     if not stats.episodes:
         print("\nno episode finished")
         return
+    if tui is not None:
+        # Held back while the TUI owned the screen.
+        for index, episode in enumerate(stats.episodes):
+            print(episode_line(index, episode))
     print(summary_line(stats))
 
     # Computed from this checkpoint's own world, not hardcoded — the freeze
