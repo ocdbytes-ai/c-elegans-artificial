@@ -165,6 +165,15 @@ class WormWorldEnv(gym.Env):
             self._renderer = PygameRenderer(self.config, self.render_mode)
         return self._renderer.draw(self.worm, self.food, self.metabolism, self.steps)
 
+    @property
+    def window_closed(self) -> bool:
+        """True once the user has closed the render window.
+
+        The simulation carries on regardless, since nothing in it depends on
+        being drawn. An open-ended viewer should poll this and stop.
+        """
+        return self._renderer is not None and self._renderer.closed
+
     def close(self) -> None:
         """Releases the renderer and any window it owns."""
         if self._renderer is not None:

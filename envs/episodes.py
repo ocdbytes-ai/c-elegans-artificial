@@ -190,9 +190,10 @@ class Policy(Protocol):
 def run_episodes(
     env: Any,
     policy: Policy,
-    episodes: int = 10,
+    episodes: int | None = 10,
     seed: int = 0,
     on_episode: Callable[[int, EpisodeSummary], None] | None = None,
+    stop: Callable[[], bool] | None = None,
 ) -> EpochStats:
     """Rolls out complete episodes and gathers their statistics.
 
@@ -202,18 +203,28 @@ def run_episodes(
     Args:
         env: A Gymnasium environment, wrapped or otherwise.
         policy: Maps an observation to an action.
-        episodes: How many episodes to run.
+        episodes: How many episodes to run, or None to go on until ``stop``
+            says otherwise. Unbounded rollouts are for watching, not measuring.
         seed: Seed of the first episode.
-        on_episode: Called as each life ends, for progressive reporting.
+        on_episode: Called as each life ends, for progressive reporting. An
+            unbounded caller should accumulate here, since a run that is
+            interrupted never reaches the return.
+        stop: Polled every step. The rollout ends as soon as it returns True,
+            which is what lets a closed window take effect mid-episode rather
+            than at the next death. The life in progress is discarded: a
+            partial episode is not a lifespan.
 
     Returns:
         Statistics over every completed episode.
     """
     stats = EpochStats()
-    for index in range(episodes):
+    index = 0
+    while episodes is None or index < episodes:
         observation, _ = env.reset(seed=seed + index)
         accumulator = EpisodeAccumulator()
         while True:
+            if stop is not None and stop():
+                return stats
             action = policy(observation)
             observation, reward, terminated, truncated, info = env.step(action)
             accumulator.add(action, reward, info)
@@ -223,6 +234,7 @@ def run_episodes(
                 if on_episode is not None:
                     on_episode(index, summary)
                 break
+        index += 1
     return stats
 
 

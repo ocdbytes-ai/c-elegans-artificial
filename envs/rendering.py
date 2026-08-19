@@ -76,6 +76,7 @@ class PygameRenderer:
         self.surface = pygame.Surface(self.size_px)
         self.window: pygame.Surface | None = None
         self.clock: pygame.time.Clock | None = None
+        self.closed = False
         if render_mode == "human":
             pygame.display.init()
             pygame.display.set_caption("AI Worm — world v1")
@@ -103,8 +104,12 @@ class PygameRenderer:
             steps: Step count, for the HUD.
 
         Returns:
-            An RGB array under ``"rgb_array"``, otherwise None.
+            An RGB array under ``"rgb_array"``, otherwise None, including once
+            the window has been closed.
         """
+        if self.closed:
+            return None
+
         self._draw_scent_field(food)
         self._draw_food(food)
         self._draw_worm(worm)
@@ -124,7 +129,14 @@ class PygameRenderer:
         return np.transpose(np.array(pygame.surfarray.pixels3d(self.surface)), (1, 0, 2))
 
     def close(self) -> None:
-        """Shuts down pygame and any window it owns."""
+        """Shuts down pygame and any window it owns.
+
+        Idempotent: a window closed by the user is closed again by
+        ``env.close()``, and tearing pygame down twice raises.
+        """
+        if self.closed:
+            return
+        self.closed = True
         if self.window is not None:
             pygame.display.quit()
             self.window = None

@@ -29,9 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import gymnasium as gym
 
-from envs import ENV_ID
+from envs import ENV_ID, UNLIMITED_EPISODE_STEPS
 from envs.config import EnvConfig
-from envs.episodes import episode_line, run_episodes, summary_line
+from envs.episodes import EpochStats, episode_line, run_episodes, summary_line
 from envs.geometry import wrap_angle
 
 
@@ -123,7 +123,12 @@ def main() -> None:
     """Runs the selected baseline and prints its statistics."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", default="random", choices=sorted(POLICIES))
-    parser.add_argument("--episodes", type=int, default=3)
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=3,
+        help="episodes to run, or 0 to keep going until stopped",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--config", default=None, help="path to a YAML config")
     parser.add_argument("--render", action="store_true", help="open a pygame window")
@@ -131,6 +136,13 @@ def main() -> None:
         "--debug",
         action="store_true",
         help="draw pellets at their true eat radius, with scent contours",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="override the step cap per episode, or 0 to let a life run until "
+        "the worm starves",
     )
     args = parser.parse_args()
 
@@ -144,17 +156,34 @@ def main() -> None:
         ENV_ID,
         config=config,
         render_mode="human" if args.render else None,
+        max_episode_steps=(
+            UNLIMITED_EPISODE_STEPS if args.max_steps == 0 else args.max_steps
+        ),
     )
     print(f"obs={env.unwrapped.observation_labels}  policy={args.policy}")
 
-    stats = run_episodes(
-        env,
-        POLICIES[args.policy](env),
-        episodes=args.episodes,
-        seed=args.seed,
-        on_episode=lambda index, episode: print(episode_line(index, episode)),
-    )
+    stats = EpochStats()
+
+    def report(index: int, episode) -> None:
+        stats.add(episode)
+        print(episode_line(index, episode), flush=True)
+
+    try:
+        run_episodes(
+            env,
+            POLICIES[args.policy](env),
+            episodes=args.episodes or None,
+            seed=args.seed,
+            on_episode=report,
+            stop=(lambda: env.unwrapped.window_closed) if args.render else None,
+        )
+    except KeyboardInterrupt:
+        print()
     env.close()
+
+    if not stats.episodes:
+        print("\nno episode finished")
+        return
     print(summary_line(stats))
 
 

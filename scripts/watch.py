@@ -18,7 +18,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from envs.episodes import episode_line, run_episodes, summary_line
+from envs import UNLIMITED_EPISODE_STEPS
+from envs.episodes import EpochStats, episode_line, run_episodes, summary_line
 from ppo import load_policy
 
 
@@ -26,7 +27,13 @@ def main() -> None:
     """Loads a checkpoint and rolls its policy out, rendering by default."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkpoint", help="path to a .pt checkpoint")
-    parser.add_argument("--episodes", type=int, default=5)
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=5,
+        help="episodes to run, or 0 to keep going until the window is closed "
+        "or Ctrl-C is pressed",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--no-render", action="store_true", help="measure instead of watch")
     parser.add_argument(
@@ -39,29 +46,54 @@ def main() -> None:
         action="store_true",
         help="draw pellets at their true eat radius, with scent contours",
     )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="override the step cap per episode, or 0 to let a life run until "
+        "the worm starves",
+    )
     args = parser.parse_args()
 
     ac, env, state = load_policy(
         args.checkpoint,
         render_mode=None if args.no_render else "human",
         env_overrides={"render": {"debug": True}} if args.debug else None,
+        max_episode_steps=(
+            UNLIMITED_EPISODE_STEPS if args.max_steps == 0 else args.max_steps
+        ),
     )
     print(
         f"epoch {state['epoch']}  ({state['total_steps']:,} env steps)  "
         f"{'stochastic' if args.stochastic else 'deterministic'}"
     )
 
-    stats = run_episodes(
-        env,
-        lambda obs: ac.act(
-            torch.as_tensor(obs, dtype=torch.float32), deterministic=not args.stochastic
-        ),
-        episodes=args.episodes,
-        seed=args.seed,
-        on_episode=lambda index, episode: print(episode_line(index, episode)),
-    )
+    # Accumulated here rather than taken from the return value: an unbounded
+    # run is ended by Ctrl-C or a closed window, and neither reaches a return.
+    stats = EpochStats()
+
+    def report(index: int, episode) -> None:
+        stats.add(episode)
+        print(episode_line(index, episode), flush=True)
+
+    try:
+        run_episodes(
+            env,
+            lambda obs: ac.act(
+                torch.as_tensor(obs, dtype=torch.float32), deterministic=not args.stochastic
+            ),
+            episodes=args.episodes or None,
+            seed=args.seed,
+            on_episode=report,
+            stop=None if args.no_render else lambda: env.unwrapped.window_closed,
+        )
+    except KeyboardInterrupt:
+        print()
     env.close()
 
+    if not stats.episodes:
+        print("\nno episode finished")
+        return
     print(summary_line(stats))
 
     # Computed from this checkpoint's own world, not hardcoded — the freeze

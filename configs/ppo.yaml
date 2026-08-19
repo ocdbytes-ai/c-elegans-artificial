@@ -26,7 +26,7 @@ network:
 
 rollout:
   steps_per_epoch: 8000
-  epochs: 500
+  epochs: 800
   # The discount horizon 1/(1-gamma) must cover the lifespan, or eating moves
   # V(s) too little to learn from. This is the single most consequential
   # hyperparameter here — notes/training.md section 3.
@@ -59,7 +59,7 @@ curriculum:
   # parameter at its target. Anneal DOWN only — the food_smell observation
   # ceiling is fixed at the starting count when the env is built.
   # Rationale and measurements: notes/training.md section 8.
-  enabled: true
+  enabled: false
   anneal_fraction: 0.8    # reach the real world 80% in, then hold and consolidate
   food_count_start: 15
   eat_radius_start: 1.5

@@ -12,6 +12,8 @@ a single scalar scent concentration at its head, so chemotaxis is a learning
 problem, not a lookup — see :mod:`envs.observations`.
 """
 
+import sys
+
 from gymnasium.envs.registration import register
 
 from .config import EnvConfig
@@ -24,6 +26,7 @@ from .worm_world import WormWorldEnv
 
 __all__ = [
     "ENV_ID",
+    "UNLIMITED_EPISODE_STEPS",
     "EnvConfig",
     "EpisodeSummary",
     "EpochStats",
@@ -38,7 +41,18 @@ __all__ = [
 # The registered id, exported so callers reference it rather than re-spelling
 # the string. Renaming the env then touches exactly one line.
 ENV_ID = "WormWorld-v1"
-MAX_EPISODE_STEPS = 2000
+MAX_EPISODE_STEPS = 4000
+
+# Pass as ``gym.make(..., max_episode_steps=UNLIMITED_EPISODE_STEPS)`` to let an
+# episode run until the worm starves. Gymnasium has no way to *remove* a
+# registered limit: passing None falls back to the spec's value, and it asserts
+# the limit is positive so math.inf is rejected. A limit no run can reach is the
+# available spelling.
+#
+# For watching only. In training, an immortal policy would never finish an
+# episode, so every per-episode statistic would be NaN and the freeze-trap
+# detector would go blind.
+UNLIMITED_EPISODE_STEPS = sys.maxsize
 
 register(
     id=ENV_ID,

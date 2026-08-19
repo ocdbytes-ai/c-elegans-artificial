@@ -50,6 +50,7 @@ def make_env(
     env_config: EnvConfig | dict[str, Any] | str | Path | None = None,
     ppo_config: PPOConfig | None = None,
     render_mode: str | None = None,
+    max_episode_steps: int | None = None,
 ) -> tuple[gym.Env, NormalizeObservation | None]:
     """Builds the training environment with the wrappers the policy expects.
 
@@ -64,6 +65,9 @@ def make_env(
         ppo_config: Supplies ``frame_stack`` and ``normalize_observations``.
             None uses the defaults.
         render_mode: Passed through to the environment.
+        max_episode_steps: Overrides the registered truncation limit, or None
+            to keep it. :data:`envs.UNLIMITED_EPISODE_STEPS` lets an episode run
+            until the worm starves, which is for watching rather than training.
 
     Returns:
         The outermost wrapper and the normaliser. The normaliser is returned
@@ -72,7 +76,12 @@ def make_env(
         stack. It is None when ``normalize_observations`` is off.
     """
     ppo_config = ppo_config or PPOConfig()
-    env = gym.make(ENV_ID, config=env_config, render_mode=render_mode)
+    env = gym.make(
+        ENV_ID,
+        config=env_config,
+        render_mode=render_mode,
+        max_episode_steps=max_episode_steps,
+    )
 
     normalizer: NormalizeObservation | None = None
     if ppo_config.rollout.normalize_observations:
@@ -446,6 +455,7 @@ def load_policy(
     device: str = "cpu",
     render_mode: str | None = None,
     env_overrides: dict[str, Any] | None = None,
+    max_episode_steps: int | None = None,
 ) -> tuple[ActorCritic, gym.Env, dict]:
     """Rebuilds a policy and its world from a checkpoint.
 
@@ -463,6 +473,9 @@ def load_policy(
         env_overrides: Nested dict merged over the stored env config, section by
             section. Mainly for loading checkpoints that predate an observation
             channel.
+        max_episode_steps: Overrides the registered truncation limit, or None to
+            keep it. Unlike the env config this is not pinned to the checkpoint,
+            since it bounds the measurement rather than the world.
 
     Returns:
         The policy, its environment, and the raw checkpoint dict.
@@ -486,7 +499,9 @@ def load_policy(
     env_config = EnvConfig.from_dict(stored)
     ppo_config = PPOConfig.from_dict(state["ppo_config"])
 
-    env, normalizer = make_env(env_config, ppo_config, render_mode=render_mode)
+    env, normalizer = make_env(
+        env_config, ppo_config, render_mode=render_mode, max_episode_steps=max_episode_steps
+    )
     _restore_normalizer(normalizer, state.get("obs_norm"))
     if normalizer is not None:
         normalizer.update_running_mean = False
