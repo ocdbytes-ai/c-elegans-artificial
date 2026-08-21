@@ -29,8 +29,8 @@ import pygame
 
 from . import geometry
 from .config import EnvConfig
-from .food import FoodField
 from .scent import make_scent_profile
+from .sources import FoodField, ScentField
 from .worm import Worm
 
 BLACK = (0, 0, 0)
@@ -87,7 +87,7 @@ class PygameRenderer:
         self._last_head: np.ndarray | None = None
         self._phase = 0.0
 
-    def draw(self, worm: Worm, food: FoodField) -> np.ndarray | None:
+    def draw(self, worm: Worm, food: FoodField, toxin: ScentField) -> np.ndarray | None:
         """Renders one frame.
 
         The counters live in the terminal now (:mod:`ppo.tui`), so nothing here
@@ -96,6 +96,7 @@ class PygameRenderer:
         Args:
             worm: The body to draw.
             food: Pellets and the scent field.
+            toxin: Hazards, drawn as rings rather than discs.
 
         Returns:
             An RGB array under ``"rgb_array"``, otherwise None, including once
@@ -106,6 +107,7 @@ class PygameRenderer:
 
         self._draw_scent_field(food)
         self._draw_food(food)
+        self._draw_toxins(toxin)
         self._draw_worm(worm)
 
         if self.render_mode == "human":
@@ -245,6 +247,40 @@ class PygameRenderer:
         dot_px = max(2, round(food_config.eat_radius * scale * self.scale))
         for position in food.positions:
             pygame.draw.circle(self.surface, WHITE, self.to_screen(position), dot_px)
+
+    def _draw_toxins(self, toxin: ScentField) -> None:
+        """Draws each toxin source as a hollow ring.
+
+        With no colour available, shape has to carry the distinction: food is
+        solid, a hazard is an outline. The ring is drawn at the radius where the
+        dose costs as much as existing does, so what it encloses is the region
+        that is genuinely worse than open water rather than an arbitrary mark.
+
+        Args:
+            toxin: The hazard field.
+        """
+        if toxin.count == 0:
+            return
+
+        config = self.config.toxin
+        # Concentration where damage == basal_cost, inverted through the profile
+        # the same way the contours are.
+        probe = np.linspace(0.0, config.scent_radius * 2.0, 2048)
+        values = toxin.profile(probe)
+        parity = self.config.metabolism.basal_cost / max(config.damage, 1e-9)
+        radius = (
+            float(np.interp(parity, values[::-1], probe[::-1]))
+            if values[-1] < parity < values[0]
+            else config.scent_radius * 0.5
+        )
+
+        radius_px = max(4, round(radius * self.scale))
+        for position in toxin.positions:
+            centre = self.to_screen(position)
+            pygame.draw.circle(self.surface, WHITE, centre, radius_px, width=2)
+            # A dot at the source itself, so a ring is never mistaken for empty
+            # space with a boundary round it.
+            pygame.draw.circle(self.surface, WHITE, centre, 2)
 
     def _track_head(self, worm: Worm) -> None:
         """Extends the trail by this frame's motion and advances the wave phase.

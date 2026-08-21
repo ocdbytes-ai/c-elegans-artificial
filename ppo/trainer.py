@@ -110,6 +110,9 @@ class PPOTrainer:
         run_dir: Where configs, logs and checkpoints are written.
         epoch: Epochs completed.
         total_steps: Environment steps taken.
+        best_score: Highest fixed-world mean lifespan seen so far, or -inf if no
+            evaluation has run.
+        best_epoch: Epoch that achieved ``best_score``.
     """
 
     def __init__(
@@ -165,6 +168,10 @@ class PPOTrainer:
         self.total_steps = 0
         self._obs, _ = self.env.reset(seed=run.seed)
         self._episode = EpisodeAccumulator()
+        # Built on first evaluation and kept alive; never stepped by training.
+        self._eval_pair: tuple[gym.Env, NormalizeObservation | None] | None = None
+        self.best_score = float("-inf")
+        self.best_epoch = 0
 
     # -- rollout -----------------------------------------------------------
 
@@ -329,8 +336,12 @@ class PPOTrainer:
                 )
                 stats = self.collect()
                 update_info = self.update()
+                eval_info = self._maybe_keep_best(epoch)
+                evaluated = not np.isnan(eval_info["eval_lifespan"])
 
-                if epoch % self.config.run.log_every == 0:
+                # An epoch that was evaluated is always logged, whatever
+                # log_every says, so a score is never computed and discarded.
+                if epoch % self.config.run.log_every == 0 or evaluated:
                     self.logger.log(
                         {
                             "epoch": epoch,
@@ -338,19 +349,62 @@ class PPOTrainer:
                             **world_info,
                             **stats.summary(),
                             **update_info,
+                            **eval_info,
                         }
                     )
                 if epoch % self.config.run.save_every == 0 or epoch == self.config.rollout.epochs:
                     self.save_checkpoint()
         finally:
             self.env.close()
+            if self._eval_pair is not None:
+                self._eval_pair[0].close()
+        if self.best_epoch:
+            print(
+                f"best fixed-world score {self.best_score:.1f} at epoch {self.best_epoch} "
+                f"-> {self.run_dir / 'checkpoints' / 'best.pt'}"
+            )
         return self.run_dir
 
-    def evaluate(self, episodes: int = 10, deterministic: bool = True) -> dict[str, float]:
-        """Rolls out the current policy without training.
+    def _maybe_keep_best(self, epoch: int) -> dict[str, float]:
+        """Scores the policy on the target world and keeps it if it is the best.
 
-        Observation statistics are frozen for the duration, so evaluation does
-        not shift the normaliser the policy trained against.
+        Run against a fixed world with fixed seeds, so epochs are compared like
+        for like. The training columns cannot serve this purpose: they are
+        scored on whatever stage the curriculum has reached, so they can fall
+        while the policy improves. Two runs in this project ended with
+        ``latest.pt`` materially worse than a mid-run checkpoint, which is what
+        this exists to stop being discovered by hand afterwards.
+
+        Args:
+            epoch: One-based epoch number.
+
+        Returns:
+            The evaluation columns for this epoch's log row, NaN on epochs that
+            were not evaluated so the column set stays constant.
+        """
+        empty = {"eval_lifespan": float("nan"), "eval_eaten": float("nan")}
+        every = self.config.run.eval_every
+        if not every or (epoch % every and epoch != self.config.rollout.epochs):
+            return empty
+
+        summary = self.evaluate(episodes=self.config.run.eval_episodes)
+        score = float(summary["lifespan_mean"])
+        if score > self.best_score:
+            self.best_score, self.best_epoch = score, epoch
+            self.save_checkpoint(name="best.pt")
+        return {"eval_lifespan": score, "eval_eaten": float(summary["eaten_mean"])}
+
+    def evaluate(self, episodes: int = 10, deterministic: bool = True) -> dict[str, float]:
+        """Scores the current policy on the target world.
+
+        Deliberately not ``self.env``: that one is the curriculum's current
+        stage, so scoring on it would drift exactly as the training log does and
+        could fall while the policy improves. A separate environment pinned to
+        ``target_env_config`` is the fixed yardstick every epoch is compared on.
+
+        The training normaliser's statistics are copied across rather than
+        learned separately, since they are part of what the policy expects to be
+        fed, and neither environment's statistics are updated by the rollout.
 
         Args:
             episodes: How many episodes to run.
@@ -359,23 +413,31 @@ class PPOTrainer:
         Returns:
             Aggregate statistics over the episodes.
         """
-        frozen = self.normalizer is not None
-        if frozen:
-            self.normalizer.update_running_mean = False
-        try:
-            stats = run_episodes(
-                self.env,
-                lambda obs: self.ac.act(self._tensor(obs), deterministic=deterministic),
-                episodes=episodes,
-                seed=EVAL_SEED,
-            )
-            return stats.summary()
-        finally:
-            if frozen:
-                self.normalizer.update_running_mean = True
-            # Evaluation left the env mid-stream; restart the training episode.
-            self._obs, _ = self.env.reset()
-            self._episode = EpisodeAccumulator()
+        env, normalizer = self._eval_env()
+        _restore_normalizer(normalizer, _normalizer_state(self.normalizer))
+        stats = run_episodes(
+            env,
+            lambda obs: self.ac.act(self._tensor(obs), deterministic=deterministic),
+            episodes=episodes,
+            seed=EVAL_SEED,
+        )
+        return stats.summary()
+
+    def _eval_env(self) -> tuple[gym.Env, NormalizeObservation | None]:
+        """Returns the evaluation environment, building it on first use.
+
+        Kept alive between evaluations so the run does not pay to construct one
+        every time, and never stepped by training.
+
+        Returns:
+            The target-world environment and its normaliser.
+        """
+        if self._eval_pair is None:
+            env, normalizer = make_env(self.target_env_config, self.config)
+            if normalizer is not None:
+                normalizer.update_running_mean = False
+            self._eval_pair = (env, normalizer)
+        return self._eval_pair
 
     # -- checkpoints -------------------------------------------------------
 

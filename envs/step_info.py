@@ -33,11 +33,13 @@ class StepInfo(TypedDict):
     basal_cost: float
     move_cost: float
     energy_intake: float
+    toxin_damage: float
 
     # Foraging.
     food_eaten: int
     food_eaten_total: int
     food_smell: float
+    toxin_smell: float
     nearest_food_distance: float
 
     # Kinematics. `touch` is the share of commanded motion the boundary ate,

@@ -39,16 +39,18 @@ class EnergyLedger:
         basal_cost: Unconditional cost of existing this step.
         move_cost: Cost attributable to the action taken.
         intake: Energy absorbed from food this step.
+        toxin_damage: Energy lost to toxin exposure this step.
     """
 
     basal_cost: float = 0.0
     move_cost: float = 0.0
     intake: float = 0.0
+    toxin_damage: float = 0.0
 
     @property
     def net(self) -> float:
         """Net energy change over the step."""
-        return self.intake - self.basal_cost - self.move_cost
+        return self.intake - self.basal_cost - self.move_cost - self.toxin_damage
 
 
 class Metabolism:
@@ -112,6 +114,27 @@ class Metabolism:
         gained = self.energy - before
         self.ledger.intake = gained
         return gained
+
+    def poison(self, concentration: float, damage: float) -> float:
+        """Applies a toxin dose proportional to the concentration sensed.
+
+        Dose rather than contact, so the cost is graded by how deep into a
+        hazard the worm is and arrives in the same step as the action that took
+        it there. Energy is floored at 0, which is already the death condition.
+
+        Args:
+            concentration: Toxin concentration at the worm's head.
+            damage: Energy lost per step at unit concentration.
+
+        Returns:
+            Energy actually lost this step.
+        """
+        if concentration <= 0.0 or damage <= 0.0:
+            return 0.0
+        lost = min(float(concentration) * damage, max(self.energy, 0.0))
+        self.energy -= lost
+        self.ledger.toxin_damage = lost
+        return lost
 
     @property
     def energy_fraction(self) -> float:

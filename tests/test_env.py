@@ -172,8 +172,9 @@ def test_episode_statistics_only_read_declared_fields():
 # -- config ----------------------------------------------------------------
 
 
-def test_shipped_yaml_documents_every_field(assert_yaml_covers_config):
-    assert_yaml_covers_config(f"{CONFIG_DIR}/world_v1.yaml", EnvConfig)
+@pytest.mark.parametrize("name", ["world_v1.yaml", "world_v2.yaml"])
+def test_shipped_yaml_documents_every_field(assert_yaml_covers_config, name):
+    assert_yaml_covers_config(f"{CONFIG_DIR}/{name}", EnvConfig)
 
 
 def test_partial_config_overrides_only_what_it_names():

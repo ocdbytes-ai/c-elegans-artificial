@@ -78,3 +78,14 @@ run:
   output_dir: experiments
   save_every: 10
   log_every: 1
+  # Fixed-world evaluation: the target world, deterministic, fixed seeds, every
+  # eval_every epochs. This is the only column in progress.csv that can be
+  # compared across epochs — the training columns are scored on whatever stage
+  # the curriculum has reached, so they fall while the policy improves. The
+  # best-scoring checkpoint is kept as checkpoints/best.pt, because two runs
+  # here ended with latest.pt well below a mid-run checkpoint (630 vs 475).
+  #
+  # Costs about eval_episodes * lifespan extra env steps per evaluation, so
+  # roughly 25/8000 = 0.3% of a run at these settings. 0 disables it.
+  eval_every: 25
+  eval_episodes: 20

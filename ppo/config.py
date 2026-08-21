@@ -221,6 +221,15 @@ class RunConfig:
         output_dir: Directory holding all runs.
         save_every: Epochs between checkpoints.
         log_every: Epochs between progress rows.
+        eval_every: Epochs between fixed-world evaluations, or 0 to skip them.
+            These are the only trustworthy progress signal in the run: the
+            training log is scored on whatever world the curriculum has reached,
+            so it can fall while the policy improves. Each evaluation costs
+            roughly ``eval_episodes * lifespan`` extra environment steps.
+        eval_episodes: Episodes per evaluation, on the target world with fixed
+            seeds. Lifespan here has a standard deviation close to its own mean,
+            so small samples are noise: 20 gives a standard error of 20-37 steps
+            against effects worth acting on of 30-60.
     """
 
     name: str = "ppo"
@@ -229,12 +238,16 @@ class RunConfig:
     output_dir: str = "experiments"
     save_every: int = 10
     log_every: int = 1
+    eval_every: int = 25
+    eval_episodes: int = 20
 
     def __post_init__(self) -> None:
         if self.device not in DEVICES:
             raise ValueError(f"device must be one of {DEVICES}")
         if self.save_every < 1 or self.log_every < 1:
             raise ValueError("save_every and log_every must be >= 1")
+        if self.eval_every < 0 or self.eval_episodes < 1:
+            raise ValueError("eval_every must be >= 0 (0 disables) and eval_episodes >= 1")
 
 
 @dataclass

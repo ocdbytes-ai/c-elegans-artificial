@@ -18,8 +18,8 @@ from gymnasium.envs.registration import register
 
 from .config import EnvConfig
 from .episodes import EpisodeSummary, EpochStats, run_episodes
-from .food import FoodField
 from .metabolism import Metabolism
+from .sources import FoodField, ScentField, ToxinField
 from .step_info import StepInfo
 from .worm import Worm
 from .worm_world import WormWorldEnv
@@ -32,7 +32,9 @@ __all__ = [
     "EpochStats",
     "FoodField",
     "Metabolism",
+    "ScentField",
     "StepInfo",
+    "ToxinField",
     "Worm",
     "WormWorldEnv",
     "run_episodes",

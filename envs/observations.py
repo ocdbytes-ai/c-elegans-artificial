@@ -30,8 +30,8 @@ import numpy as np
 from gymnasium import spaces
 
 from .config import EnvConfig
-from .food import FoodField, max_possible_scent
 from .metabolism import Metabolism
+from .sources import FoodField, ToxinField, max_possible_scent, max_possible_toxin
 from .worm import Worm
 
 
@@ -42,11 +42,13 @@ class Sensors:
     Attributes:
         worm: The body, for position, heading and mechanosensation.
         food: The pellet field, for scent.
+        toxin: The hazard field, for its own scent.
         metabolism: Energy state, for interoception.
     """
 
     worm: Worm
     food: FoodField
+    toxin: ToxinField
     metabolism: Metabolism
 
 
@@ -89,6 +91,19 @@ def build_channels(config: EnvConfig) -> list[Channel]:
     channels.append(
         Channel("food_smell", 0.0, ceiling, lambda s: float(s.food.scent_at(s.worm.position)))
     )
+
+    if config.observation.include_toxin:
+        # A second labelled line rather than a shared or signed channel: summed,
+        # food beside a toxin is indistinguishable from strong food; signed, the
+        # two cancel and the most dangerous spot reads as open water. Separate
+        # channels give the worm the ability to tell them apart while leaving it
+        # to learn which one is worth approaching.
+        toxin_ceiling = max_possible_toxin(config.toxin)
+        channels.append(
+            Channel(
+                "toxin_smell", 0.0, toxin_ceiling, lambda s: float(s.toxin.scent_at(s.worm.position))
+            )
+        )
 
     if config.observation.include_touch:
         # Mechanosensation: 0 in open water, approaching 1 pushing head-on into

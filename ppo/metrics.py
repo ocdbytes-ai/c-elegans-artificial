@@ -30,6 +30,9 @@ class RunLogger:
         start: Wall-clock time the logger was created.
     """
 
+    # eval_lifespan is the only column here scored on a fixed world, so it is
+    # the only one that can be compared across epochs. It is NaN on epochs that
+    # were not evaluated, and those are skipped rather than printed as "nan".
     HEADLINE = (
         "food_count",
         "lifespan_mean",
@@ -37,6 +40,7 @@ class RunLogger:
         "mean_abs_action",
         "entropy",
         "death_rate",
+        "eval_lifespan",
     )
 
     def __init__(self, run_dir: Path):
@@ -74,6 +78,6 @@ class RunLogger:
         headline = "  ".join(
             f"{key.replace('_mean', '')} {row[key]:>8.3f}"
             for key in self.HEADLINE
-            if key in row
+            if key in row and row[key] == row[key]  # skip NaN
         )
         print(f"epoch {row['epoch']:>4}  steps {row['total_steps']:>9,}  {headline}")

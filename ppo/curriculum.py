@@ -1,4 +1,6 @@
 """Tightens the world from forgiving to real over a single run.
+(Basically Makes the word harder towards the end of the training. This allows
+the model to adapt to the situation)
 
 The env config handed to the trainer is the *target*: the world the policy must
 eventually handle. This module produces the world it trains in today,
@@ -61,9 +63,13 @@ class Curriculum:
             return _describe(fraction, live)
 
         if self.config.food_count_start is not None:
-            food.count = max(1, round(_lerp(self.config.food_count_start, target.count, fraction)))
+            food.count = max(
+                1, round(_lerp(self.config.food_count_start, target.count, fraction))
+            )
         if self.config.eat_radius_start is not None:
-            food.eat_radius = _lerp(self.config.eat_radius_start, target.eat_radius, fraction)
+            food.eat_radius = _lerp(
+                self.config.eat_radius_start, target.eat_radius, fraction
+            )
         if self.config.scent_radius_start is not None:
             food.scent_radius = _lerp(
                 self.config.scent_radius_start, target.scent_radius, fraction

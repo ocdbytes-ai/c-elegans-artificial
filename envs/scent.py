@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from .config import FoodConfig
+from .config import FoodConfig, ToxinConfig
 
 ScentProfile = Callable[[np.ndarray], np.ndarray]
 
@@ -65,11 +65,13 @@ def inverse_square(distance: np.ndarray, radius: float, peak: float) -> np.ndarr
     return peak / (1.0 + (distance / (0.5 * radius)) ** 2)
 
 
-def make_scent_profile(config: FoodConfig) -> ScentProfile:
+def make_scent_profile(config: FoodConfig | ToxinConfig) -> ScentProfile:
     """Binds the configured profile's parameters into a callable.
 
     Args:
-        config: Food config naming the profile and its parameters.
+        config: Food or toxin config naming the profile and its parameters.
+            Both emit scent the same way; only what contact with the source
+            does to the worm differs.
 
     Returns:
         A function mapping distance to concentration.

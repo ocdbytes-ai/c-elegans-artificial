@@ -1,10 +1,17 @@
-# World v1 — point worm, random food, scent field.
+# World v2 — point worm, food, and toxins.
 #
-# The tuning surface for envs/config.py, which holds the schema, the defaults
-# and the reasoning. Every field is named here (tests/test_env.py enforces
-# that), but a YAML passed to the env may be partial:
+# World v1 plus a second chemical sense. Everything about foraging is unchanged;
+# what is new is that some of the arena costs energy to occupy, and the worm can
+# smell it on a channel of its own.
 #
-#   env = WormWorldEnv(config="configs/world_v1.yaml")
+#   uv run python train.py --env-config configs/world_v2.yaml --name toxins
+#
+# A complete file, like world_v1.yaml — every field is named (tests/test_env.py
+# enforces that), though a YAML passed to the env may be partial.
+#
+# NOTE: the toxin_smell channel widens the observation from 5 channels to 6
+# (20 -> 24 dims after frame stacking), so no world-v1 checkpoint can be
+# resumed into this. World v2 trains from scratch.
 #
 # Parameter reference: notes/training.md section 10.
 
@@ -34,7 +41,9 @@ randomization:
   speed_scale: [0.75, 1.25]
   turn_rate_scale: [0.75, 1.25]
   # Unlike the actuation draws this one is sensable — a denser world smells
-  # stronger everywhere — so scarcity can be searched for differently.
+  # stronger everywhere — so scarcity can be searched for differently. Toxin
+  # count is deliberately NOT randomised: with two chemical fields varying at
+  # once, an episode's difficulty stops being attributable to either.
   food_count_scale: [0.5, 1.5]
 
 food:
@@ -56,16 +65,28 @@ food:
   min_spawn_distance: 2.0
 
 toxin:
-  # Hazards emitting their own scent on their own observation channel. count 0
-  # disables them and leaves this a pure world-v1 foraging task; the worm only
-  # grows the toxin_smell channel when observation.include_toxin is also true.
-  #
   # Damage is a dose, not a collision: energy lost per step is `damage` times
-  # the concentration sensed, so harm is graded, arrives in the same step as
-  # the action that caused it, and leaves a gradient to descend.
-  count: 0
-  damage: 1.5             # at full concentration, against basal_cost 0.20
-  scent_radius: 4.0
+  # the concentration sensed. Graded rather than binary, it arrives in the same
+  # step as the action that caused it — well inside the credit-assignment
+  # window — and it leaves a gradient to descend, where a contact hazard would
+  # be an invisible cliff edge.
+  #
+  # Size the field by how much of the arena actually costs something to be in,
+  # measured as the fraction where dose exceeds basal_cost:
+  #   count 8, radius 4.0 -> 37% of the arena
+  #   count 5, radius 3.0 -> 15% of the arena
+  #   count 4, radius 3.0 -> 12% of the arena
+  # 8 sources at food's own radius sounds balanced and is not: a third of the
+  # world is worse than open water and the safe policy is to stop foraging.
+  # At 5, avoidance is worth learning while foraging is still the main task.
+  count: 5
+  # At full concentration this is 7.5x basal_cost, so sitting on a source burns
+  # a full worm in ~35 steps: harsh enough to matter, slow enough that the
+  # association is learnable rather than instantly fatal.
+  damage: 0.8 # Reduced from 1.5 to check if worm starts taking risk rather than be too scared 
+  # Tighter than food's 4.0, which is what keeps total coverage reasonable.
+  # Judge any change here by arena coverage, not by the number itself.
+  scent_radius: 3.0
   scent_peak: 1.0
   scent_profile: gaussian
   gaussian_sigma_scale: 0.35
@@ -76,7 +97,10 @@ metabolism:
   initial_energy: 60.0
   # THE critical ratio: basal must dominate move, or freezing outlives foraging
   # and training converges there. initial_energy / basal_cost is the freeze
-  # baseline every policy has to beat — notes/training.md section 7.
+  # baseline, and toxins leave it intact: min_spawn_distance keeps hazards off
+  # the spawn point and a frozen worm never leaves it, so freeze measures 297
+  # against the formula's 300. Toxins tax movement, not stillness, which makes
+  # the baseline a slightly harder bar to clear than it looks.
   basal_cost: 0.20
   move_cost: 0.02         # multiplied by |action|^2
   food_value: 25.0
@@ -89,13 +113,13 @@ reward:
 
 observation:
   include_energy: true
-  # A second chemical sense on its own channel. Kept separate from food_smell
-  # deliberately: summed, food-beside-toxin is numerically identical to strong
-  # food; signed, the two cancel and the most dangerous spot in the arena reads
-  # as open water. Separate lines give discriminability and leave valence to be
-  # learned. Turning this on changes the observation width, which invalidates
-  # every checkpoint trained without it.
-  include_toxin: false
+  # The v2 channel. Kept separate from food_smell deliberately: summed,
+  # food-beside-toxin is numerically identical to strong food; signed, the two
+  # cancel and the most dangerous spot in the arena reads as open water.
+  # Separate lines give the worm the ability to tell them apart, and leave it
+  # to learn which one is worth approaching. Set false, with count above left
+  # alone, for the toxin-blind control run.
+  include_toxin: true
   # Mechanosensation. Under boundary: clamp a wall is otherwise invisible — the
   # worm cannot tell it has stopped moving, so it cannot learn to turn away.
   # Constant 0 under wrap.

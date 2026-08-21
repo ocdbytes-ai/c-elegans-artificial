@@ -171,6 +171,58 @@ class FoodConfig:
 
 
 @dataclass
+class ToxinConfig:
+    """Hazards that emit a scent and cost energy to be near.
+
+    Structurally food's mirror image, with one deliberate difference: a toxin is
+    never touched or consumed. Damage is a *dose*, proportional to the
+    concentration at the worm's head, so harm is graded rather than binary. Two
+    reasons. It arrives in the same step as the action that caused it, so it
+    sits well inside the credit-assignment window; and it leaves a gradient to
+    descend, where a contact hazard would be an invisible cliff edge.
+
+    Attributes:
+        count: Toxin sources in the world. 0 disables them entirely, which is
+            the default and leaves the world exactly as world v1 describes it.
+        damage: Energy lost per step at full concentration, scaled by the
+            concentration actually sensed. Judge it against
+            ``metabolism.basal_cost``: at 1.5 against a basal of 0.2, sitting on
+            a source is roughly 8x the cost of existing.
+        scent_radius: Sensory scale of the falloff.
+        scent_peak: Concentration at a source's exact centre.
+        scent_profile: One of :data:`SCENT_PROFILES`; see :mod:`envs.scent`.
+        gaussian_sigma_scale: Gaussian sigma as a fraction of ``scent_radius``.
+        min_spawn_distance: Clearance kept between a source and the worm at
+            reset, so no episode opens already inside one.
+    """
+
+    count: int = 0
+    damage: float = 1.5
+    scent_radius: float = 4.0
+    scent_peak: float = 1.0
+    scent_profile: str = "gaussian"
+    gaussian_sigma_scale: float = 0.35
+    min_spawn_distance: float = 3.0
+
+    def __post_init__(self) -> None:
+        if self.count < 0:
+            raise ValueError("toxin.count must be >= 0 (0 disables toxins)")
+        if self.scent_profile not in SCENT_PROFILES:
+            raise ValueError(
+                f"scent_profile must be one of {SCENT_PROFILES}, got {self.scent_profile!r}"
+            )
+        if self.scent_radius <= 0:
+            raise ValueError("toxin.scent_radius must be positive")
+        if self.damage < 0:
+            raise ValueError("toxin.damage is subtracted; give it a positive magnitude")
+
+    @property
+    def enabled(self) -> bool:
+        """Whether any toxin exists in the world."""
+        return self.count > 0
+
+
+@dataclass
 class MetabolismConfig:
     """Energy bookkeeping, and the rates that decide what strategy pays.
 
@@ -241,6 +293,14 @@ class ObservationConfig:
 
     Attributes:
         include_energy: Interoception, required for hunger-modulated behaviour.
+        include_toxin: A second chemical sense, reporting toxin concentration on
+            its own channel. Separate from ``food_smell`` because a summed or
+            signed channel cannot be disentangled: summed, food-beside-toxin is
+            numerically identical to a strong food source; signed, the two
+            cancel and the most dangerous spot in the arena reads as open water.
+            A separate line supplies discriminability while leaving valence to
+            be learned, which is also how the animal is wired. Constant 0 when
+            ``toxin.count`` is 0.
         include_touch: Mechanosensation, reporting how much of the last step's
             commanded motion the world refused. Under ``boundary: clamp`` a wall
             is otherwise invisible: the worm cannot tell it has stopped moving,
@@ -250,6 +310,7 @@ class ObservationConfig:
 
     include_energy: bool = True
     include_touch: bool = True
+    include_toxin: bool = False
 
 
 @dataclass
@@ -322,6 +383,7 @@ class EnvConfig(config_io.ConfigRoot):
         worm: Nominal body parameters.
         randomization: Per-episode spread on body and food count.
         food: Pellets and the scent they emit.
+        toxin: Hazards and the scent they emit.
         metabolism: Energy rates and limits.
         reward: The reward function.
         observation: Which optional channels the worm senses.
@@ -332,6 +394,7 @@ class EnvConfig(config_io.ConfigRoot):
     worm: WormConfig = field(default_factory=WormConfig)
     randomization: RandomizationConfig = field(default_factory=RandomizationConfig)
     food: FoodConfig = field(default_factory=FoodConfig)
+    toxin: ToxinConfig = field(default_factory=ToxinConfig)
     metabolism: MetabolismConfig = field(default_factory=MetabolismConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     observation: ObservationConfig = field(default_factory=ObservationConfig)

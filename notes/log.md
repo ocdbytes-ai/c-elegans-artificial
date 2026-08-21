@@ -59,3 +59,11 @@ r_t(\theta) \;=\; \exp\!\Big(\log \pi_\theta(a_t\mid s_t) \;-\; \log \pi_{\theta
 \qquad
 \log \pi_\theta(a\mid s) \;=\; \sum_{i=1}^{k} \log \mathcal{N}\!\big(a_i;\, \mu_{\theta,i}(s),\, \sigma_i\big)
 $$
+
+## Stage 2 
+
+Stage 2 of the project was to add a sense for toxins and that was very simple compared to Stage 1 as I only had to add a channel to sense toxins (this is how it happens in a real life worm btw the worm has set of channels for different things and all work through chemotaxis). I added the channel and worm detects it automatically that toxin is bad for it without hard coding a real logic into the worm's programming. I mean it is cool !! (atleast for me).
+
+Problem during the implementation and training :
+
+I added the damage from toxins as a huge multiplier of `1.5` now the problem is that the worm kind of is scared and not bold enough to take risks and actually go look out for food in order to survive so I tried decreasing the multiplier to `0.8` to see if worm starts taking risk or not --> I saw increase in lifespan by making the worm more confident and actually risk taking. If talking about numbers I saw about 24 % increase in lifespan in the trained policy.  

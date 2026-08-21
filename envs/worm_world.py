@@ -5,7 +5,7 @@ metabolism. The only reward is ``+1`` per step survived, so foraging has to
 emerge rather than being rewarded directly.
 
 The environment is deliberately thin. It owns the RNG and the step ordering and
-delegates the rest: :mod:`envs.worm` moves the body, :mod:`envs.food` owns
+delegates the rest: :mod:`envs.worm` moves the body, :mod:`envs.sources` owns
 pellets and scent, :mod:`envs.metabolism` owns energy, and
 :mod:`envs.observations` decides what any of it looks like to the policy.
 """
@@ -20,9 +20,9 @@ import numpy as np
 from gymnasium import spaces
 
 from .config import EnvConfig
-from .food import FoodField
 from .metabolism import Metabolism
 from .observations import ObservationBuilder, Sensors
+from .sources import FoodField, ToxinField
 from .step_info import StepInfo
 from .worm import Worm
 
@@ -46,6 +46,7 @@ class WormWorldEnv(gym.Env):
         config: The resolved environment config.
         worm: The body.
         food: Pellets and the scent field.
+        toxin: Hazards and the scent field they emit.
         metabolism: Energy state.
         steps: Steps taken this episode.
         render_mode: One of ``metadata["render_modes"]``, or None.
@@ -84,6 +85,7 @@ class WormWorldEnv(gym.Env):
 
         self.worm = Worm(self.config.worm, self.config.world, self.config.randomization)
         self.food = FoodField(self.config.food, self.config.world, self.config.randomization)
+        self.toxin = ToxinField(self.config.toxin, self.config.world)
         self.metabolism = Metabolism(self.config.metabolism)
         self._observation = ObservationBuilder(self.config)
         self._renderer: Any | None = None
@@ -112,6 +114,7 @@ class WormWorldEnv(gym.Env):
         super().reset(seed=seed)
         self.worm.reset(self.np_random)
         self.food.reset(self.np_random, self.worm.position)
+        self.toxin.reset(self.np_random, self.worm.position)
         self.metabolism.reset()
         self.steps = 0
 
@@ -138,6 +141,11 @@ class WormWorldEnv(gym.Env):
         move = self.worm.step(action, speed_factor=self.metabolism.speed_factor)
         eaten = self.food.consume(self.worm.position, self.np_random)
         self.metabolism.eat(eaten)
+        # Dosed after moving, so the cost reflects where the action landed the
+        # worm rather than where it set off from.
+        self.metabolism.poison(
+            float(self.toxin.scent_at(self.worm.position)), self.config.toxin.damage
+        )
         self.steps += 1
 
         terminated = self.metabolism.is_dead
@@ -163,7 +171,7 @@ class WormWorldEnv(gym.Env):
             from .rendering import PygameRenderer  # imported lazily: pygame is optional
 
             self._renderer = PygameRenderer(self.config, self.render_mode)
-        return self._renderer.draw(self.worm, self.food)
+        return self._renderer.draw(self.worm, self.food, self.toxin)
 
     @property
     def window_closed(self) -> bool:
@@ -182,7 +190,7 @@ class WormWorldEnv(gym.Env):
 
     def _observe(self) -> np.ndarray:
         """Reads the current observation."""
-        return self._observation(Sensors(self.worm, self.food, self.metabolism))
+        return self._observation(Sensors(self.worm, self.food, self.toxin, self.metabolism))
 
     def _info(self, eaten: int, moved: float) -> StepInfo:
         """Assembles the per-step diagnostics.
@@ -207,9 +215,11 @@ class WormWorldEnv(gym.Env):
             "basal_cost": ledger.basal_cost,
             "move_cost": ledger.move_cost,
             "energy_intake": ledger.intake,
+            "toxin_damage": ledger.toxin_damage,
             "food_eaten": eaten,
             "food_eaten_total": self.food.eaten_total,
             "food_smell": float(self.food.scent_at(self.worm.position)),
+            "toxin_smell": float(self.toxin.scent_at(self.worm.position)),
             "nearest_food_distance": food_distance,
             "distance_moved": moved,
             "touch": self.worm.blocked,
