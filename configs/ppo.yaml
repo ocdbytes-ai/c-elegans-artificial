@@ -9,7 +9,20 @@
 network:
   hidden_sizes: [128, 128]
   activation: tanh
+  # Make sigma a network output instead of a bare parameter. With a fixed
+  # sigma the worm can change where it aims but not how randomly it acts, so
+  # klinokinesis — modulating the RATE of random reorientation with the
+  # chemical signal — cannot be expressed at all. It is also the only way a
+  # mirror-symmetric policy can do local search: a turn flips sign under
+  # reflection while concentration does not, so a concentration-driven turn
+  # has to go through the noise term. See notes/training.md.
+  state_dependent_std: true 
   log_std_init: -0.5
+  # Under state_dependent_std, log_std_min and log_std_max are the limits the
+  # network output is squashed into, and log_std_min can no longer be null.
+  # The gap between them is how much the worm may vary its own randomness,
+  # which is what klinokinesis needs. Default range: sigma 0.20 to 1.00.
+  log_std_max: 0.0
   # Floor on the policy std, clamped after every policy step. Sampling is the
   # only exploration PPO has and the surrogate always prefers narrowing it, so
   # an unfloored run collapsed sigma and its last 100 epochs learned nothing.
@@ -25,8 +38,8 @@ network:
   mean_bias_init: [0.0, 0.5]
 
 rollout:
-  steps_per_epoch: 8000
-  epochs: 800
+  steps_per_epoch: 10000
+  epochs: 1000
   # The discount horizon 1/(1-gamma) must cover the lifespan, or eating moves
   # V(s) too little to learn from. This is the single most consequential
   # hyperparameter here — notes/training.md section 3.
@@ -50,7 +63,7 @@ optim:
   # only. Under a survival reward, freezing is a strong early attractor. The
   # surrogate wins this negotiation regardless; see notes/training.md section
   # 5. Set to 0.0 to match spinup exactly.
-  entropy_coef: 0.01
+  entropy_coef: 0.0 # disabling the entropy for runs that have std as model output 
   max_grad_norm: 0.5      # 0 disables clipping
 
 curriculum:
@@ -59,7 +72,7 @@ curriculum:
   # parameter at its target. Anneal DOWN only — the food_smell observation
   # ceiling is fixed at the starting count when the env is built.
   # Rationale and measurements: notes/training.md section 8.
-  enabled: false
+  enabled: false 
   anneal_fraction: 0.8    # reach the real world 80% in, then hold and consolidate
   food_count_start: 15
   eat_radius_start: 1.5
