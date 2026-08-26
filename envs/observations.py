@@ -44,12 +44,19 @@ class Sensors:
         food: The pellet field, for scent.
         toxin: The hazard field, for its own scent.
         metabolism: Energy state, for interoception.
+        food_smell: Scent at the worm's head this step. Passed in rather than
+            recomputed per channel, since two channels read it.
+        previous_food_smell: The same value one step ago. Equal to
+            ``food_smell`` on the first step of an episode, so the difference
+            starts at 0.
     """
 
     worm: Worm
     food: FoodField
     toxin: ToxinField
     metabolism: Metabolism
+    food_smell: float = 0.0
+    previous_food_smell: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -88,9 +95,23 @@ def build_channels(config: EnvConfig) -> list[Channel]:
     # The ceiling covers the richest episode the world can draw. Unreachable in
     # practice, but it bounds the space honestly.
     ceiling = max_possible_scent(config.food, config.randomization)
-    channels.append(
-        Channel("food_smell", 0.0, ceiling, lambda s: float(s.food.scent_at(s.worm.position)))
-    )
+    if config.observation.include_smell_level:
+        channels.append(Channel("food_smell", 0.0, ceiling, lambda s: s.food_smell))
+
+    if config.observation.include_smell_delta:
+        # The same number the network could compute from two stacked frames, but
+        # given its own channel so the normaliser scales it to unit variance.
+        # Consecutive readings are ~0.97 correlated, so a difference taken from
+        # the stack arrives about 4x quieter than the level it came from, and
+        # the policy follows the louder signal.
+        channels.append(
+            Channel(
+                "food_smell_delta",
+                -ceiling,
+                ceiling,
+                lambda s: s.food_smell - s.previous_food_smell,
+            )
+        )
 
     if config.observation.include_toxin:
         # A second labelled line rather than a shared or signed channel: summed,

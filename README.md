@@ -33,7 +33,6 @@ There are no hard coded scenarious everything the worm does is for survival.
 ## Docs 
 
 - [Biology](./notes/biology.md)
-- [Training](./notes/training.md)
 
 ## Checklist
 

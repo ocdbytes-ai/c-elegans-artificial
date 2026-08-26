@@ -5,16 +5,13 @@
 # that), but a YAML passed to the env may be partial:
 #
 #   env = WormWorldEnv(config="configs/world_v1.yaml")
-#
-# Parameter reference: notes/training.md section 10.
 
 world:
   width: 20.0
   height: 20.0
   dt: 0.1                 # seconds of simulated time per step
   # "wrap" is a torus, where straight-line sweeping forages without sensing;
-  # "clamp" has walls, which the touch channel exists to perceive. See
-  # notes/training.md section 7.
+  # "clamp" has walls, which the touch channel exists to perceive.
   boundary: clamp
 
 worm:
@@ -51,8 +48,8 @@ food:
   # Judge it against the scent sigma (gaussian_sigma_scale * scent_radius),
   # not against eat_radius: past ~2 sigma the worm both starts every episode
   # outside its own sensory range and respawns each meal out of range, which
-  # turns every episode's opening into a blind walk. See notes/training.md
-  # section 7. At 2.0 this is ~1.4 sigma, still twice eat_radius.
+  # turns every episode's opening into a blind walk. At 2.0 this is ~1.4
+  # sigma, still twice eat_radius.
   min_spawn_distance: 2.0
 
 toxin:
@@ -76,7 +73,7 @@ metabolism:
   initial_energy: 60.0
   # THE critical ratio: basal must dominate move, or freezing outlives foraging
   # and training converges there. initial_energy / basal_cost is the freeze
-  # baseline every policy has to beat — notes/training.md section 7.
+  # baseline every policy has to beat.
   basal_cost: 0.20
   move_cost: 0.02         # multiplied by |action|^2
   food_value: 25.0
@@ -89,6 +86,13 @@ reward:
 
 observation:
   include_energy: true
+  # Report the step-to-step change in scent on its own channel. The network can
+  # already derive this from stacked frames, so no information is added. What
+  # changes is scale: the normaliser standardises channels, not differences
+  # taken from them, so a difference computed from the stack arrives about 4x
+  # quieter than the level. Klinokinesis needs the difference, area-restricted
+  # search needs only the level, and the louder signal wins when they compete.
+  include_smell_delta: false
   # A second chemical sense on its own channel. Kept separate from food_smell
   # deliberately: summed, food-beside-toxin is numerically identical to strong
   # food; signed, the two cancel and the most dangerous spot in the arena reads

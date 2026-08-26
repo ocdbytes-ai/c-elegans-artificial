@@ -19,7 +19,7 @@ Every field is the sum over its sources rather than the maximum, so overlapping
 sources build a richer landscape than any single one. That draws the worm toward
 regions of high density rather than toward one pellet, which matches how a
 chemical gradient behaves. It also means the field's local maxima do not
-necessarily sit on sources; see ``notes/training.md``.
+necessarily sit on sources.
 """
 
 from __future__ import annotations

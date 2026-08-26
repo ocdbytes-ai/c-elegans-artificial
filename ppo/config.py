@@ -20,8 +20,7 @@ DEVICES = ("auto", "cpu", "cuda", "mps")
 class NetworkConfig:
     """Actor-critic architecture and initialisation.
 
-    A plain MLP is the right starting point for world v1. See
-    ``notes/training.md`` for the measurements behind the defaults.
+    A plain MLP is the right starting point for world v1.
 
     Attributes:
         hidden_sizes: Widths of the shared hidden-layer shape, used for both the
@@ -30,8 +29,8 @@ class NetworkConfig:
         state_dependent_std: Compute the standard deviation from the
             observation instead of storing it as one parameter. A fixed sigma
             lets the worm change where it aims but not how randomly it moves.
-            Klinokinesis needs the second, so it cannot be learned without this.
-            See ``notes/training.md``.
+            Klinokinesis needs the second, so it cannot be learned without
+            this.
         log_std_init: Starting log standard deviation. The default gives sigma
             ~0.61. Under ``state_dependent_std`` the head is set up to return
             this value for every observation, so both modes start the same.
@@ -105,7 +104,7 @@ class RolloutConfig:
         epochs: Update rounds in the run.
         gamma: Discount factor. Its horizon ``1/(1-gamma)`` must stay within a
             few multiples of the freeze lifespan, or eating changes ``V(s)`` by
-            too little to learn from; see ``notes/training.md``.
+            too little to learn from.
         gae_lambda: GAE lambda, trading advantage bias against variance.
         frame_stack: Observation frames concatenated. Smell alone has no time
             axis, so stacking is what turns "how much" into "more than before".
@@ -192,7 +191,7 @@ class CurriculumConfig:
         eat_radius_start: Starting contact radius, or None to pin.
         scent_radius_start: Starting sensory radius, or None to pin. Raising it
             helps early sensing but merges neighbouring pellets into single
-            hills whose summits hold no food; see ``notes/training.md``.
+            hills whose summits hold no food.
         metabolism_scale_start: Divides ``basal_cost`` and ``move_cost`` by this
             at the start, annealing to 1.0, or None to pin. Scaling both
             together makes it a pure time dilation that leaves the food

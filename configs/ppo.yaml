@@ -3,8 +3,6 @@
 # The tuning surface for ppo/config.py, which holds the schema, the defaults
 # and the reasoning. Every field is named here (tests/test_ppo.py enforces
 # that), but a file passed to the trainer may be partial.
-#
-# Parameter reference: notes/training.md section 10.
 
 network:
   hidden_sizes: [128, 128]
@@ -15,9 +13,9 @@ network:
   # chemical signal — cannot be expressed at all. It is also the only way a
   # mirror-symmetric policy can do local search: a turn flips sign under
   # reflection while concentration does not, so a concentration-driven turn
-  # has to go through the noise term. See notes/training.md.
+  # has to go through the noise term.
   state_dependent_std: true 
-  log_std_init: -0.5
+  log_std_init: -0.7
   # Under state_dependent_std, log_std_min and log_std_max are the limits the
   # network output is squashed into, and log_std_min can no longer be null.
   # The gap between them is how much the worm may vary its own randomness,
@@ -27,8 +25,8 @@ network:
   # only exploration PPO has and the surrogate always prefers narrowing it, so
   # an unfloored run collapsed sigma and its last 100 epochs learned nothing.
   # Costs nothing at evaluation, which uses the mean. This floor has never
-  # demonstrably helped here — notes/training.md section 5. null disables it.
-  log_std_min: -1.6
+  # demonstrably helped here. null disables it.
+  log_std_min: -1.3 
   # Initial bias per action dimension: [turn, throttle]. A zero-mean throttle
   # cancels forward against backward, leaving an untrained worm diffusing
   # rather than travelling, with no variation in outcome to learn from at any
@@ -42,7 +40,7 @@ rollout:
   epochs: 1000
   # The discount horizon 1/(1-gamma) must cover the lifespan, or eating moves
   # V(s) too little to learn from. This is the single most consequential
-  # hyperparameter here — notes/training.md section 3.
+  # hyperparameter here.
   gamma: 0.998
   gae_lambda: 0.97
   # Smell is one scalar: a single frame says "how much", never "more than
@@ -61,8 +59,7 @@ optim:
   target_kl: 0.015
   # Spinning Up's PPO has no entropy term — it computes entropy for logging
   # only. Under a survival reward, freezing is a strong early attractor. The
-  # surrogate wins this negotiation regardless; see notes/training.md section
-  # 5. Set to 0.0 to match spinup exactly.
+  # surrogate wins this negotiation regardless. Set to 0.0 to match spinup.
   entropy_coef: 0.0 # disabling the entropy for runs that have std as model output 
   max_grad_norm: 0.5      # 0 disables clipping
 
@@ -71,7 +68,6 @@ curriculum:
   # supplies the END of each ramp; these are only the starts. null pins a
   # parameter at its target. Anneal DOWN only — the food_smell observation
   # ceiling is fixed at the starting count when the env is built.
-  # Rationale and measurements: notes/training.md section 8.
   enabled: false 
   anneal_fraction: 0.8    # reach the real world 80% in, then hold and consolidate
   food_count_start: 15

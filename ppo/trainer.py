@@ -147,7 +147,9 @@ class PPOTrainer:
         self.ac = ActorCritic(
             self.env.observation_space, self.env.action_space, self.config.network
         ).to(self.device)
-        self.pi_optimizer = Adam(self.ac.pi.parameters(), lr=self.config.optim.policy_lr)
+        self.pi_optimizer = Adam(
+            self.ac.pi.parameters(), lr=self.config.optim.policy_lr
+        )
         self.vf_optimizer = Adam(self.ac.v.parameters(), lr=self.config.optim.value_lr)
         self.buffer = RolloutBuffer(
             obs_dim, act_dim, rollout.steps_per_epoch, rollout.gamma, rollout.gae_lambda
@@ -212,7 +214,9 @@ class PPOTrainer:
 
     # -- update ------------------------------------------------------------
 
-    def _policy_loss(self, data: dict[str, torch.Tensor]) -> tuple[torch.Tensor, dict[str, float]]:
+    def _policy_loss(
+        self, data: dict[str, torch.Tensor]
+    ) -> tuple[torch.Tensor, dict[str, float]]:
         """Computes the clipped surrogate loss and its diagnostics.
 
         Args:
@@ -261,7 +265,9 @@ class PPOTrainer:
             module: The module whose gradients to clip.
         """
         if self.config.optim.max_grad_norm > 0:
-            torch.nn.utils.clip_grad_norm_(module.parameters(), self.config.optim.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(
+                module.parameters(), self.config.optim.max_grad_norm
+            )
 
     def update(self) -> dict[str, float]:
         """Runs one PPO update over the collected epoch.
@@ -295,7 +301,7 @@ class PPOTrainer:
             self.pi_optimizer.step()
             self.ac.pi.clamp_log_std()  # exploration floor, applied every step
 
-        # Gradient descent for Critic 
+        # Gradient descent for Critic
         for _ in range(optim.value_iters):
             self.vf_optimizer.zero_grad()
             loss_v = self._value_loss(data)
@@ -348,7 +354,9 @@ class PPOTrainer:
             checkpoints.
         """
         print(f"run dir: {self.run_dir}")
-        print(f"obs {self.env.observation_space.shape}  act {self.env.action_space.shape}")
+        print(
+            f"obs {self.env.observation_space.shape}  act {self.env.action_space.shape}"
+        )
         try:
             for epoch in range(1, self.config.rollout.epochs + 1):
                 self.epoch = epoch
@@ -375,7 +383,10 @@ class PPOTrainer:
                             **eval_info,
                         }
                     )
-                if epoch % self.config.run.save_every == 0 or epoch == self.config.rollout.epochs:
+                if (
+                    epoch % self.config.run.save_every == 0
+                    or epoch == self.config.rollout.epochs
+                ):
                     self.save_checkpoint()
         finally:
             self.env.close()
@@ -417,7 +428,9 @@ class PPOTrainer:
             self.save_checkpoint(name="best.pt")
         return {"eval_lifespan": score, "eval_eaten": float(summary["eaten_mean"])}
 
-    def evaluate(self, episodes: int = 10, deterministic: bool = True) -> dict[str, float]:
+    def evaluate(
+        self, episodes: int = 10, deterministic: bool = True
+    ) -> dict[str, float]:
         """Scores the current policy on the target world.
 
         Deliberately not ``self.env``: that one is the curriculum's current
@@ -585,7 +598,10 @@ def load_policy(
     ppo_config = PPOConfig.from_dict(state["ppo_config"])
 
     env, normalizer = make_env(
-        env_config, ppo_config, render_mode=render_mode, max_episode_steps=max_episode_steps
+        env_config,
+        ppo_config,
+        render_mode=render_mode,
+        max_episode_steps=max_episode_steps,
     )
     _restore_normalizer(normalizer, state.get("obs_norm"))
     if normalizer is not None:
@@ -607,13 +623,17 @@ def load_policy(
             f'load_policy(path, env_overrides={{"observation": {{"include_touch": False}}}}).'
         )
 
-    ac = ActorCritic(env.observation_space, env.action_space, ppo_config.network).to(device)
+    ac = ActorCritic(env.observation_space, env.action_space, ppo_config.network).to(
+        device
+    )
     ac.load_state_dict(state["model"])
     ac.eval()
     return ac, env, state
 
 
-def _observation_shape(env_config: dict[str, Any], ppo_config: dict[str, Any]) -> tuple[int, ...]:
+def _observation_shape(
+    env_config: dict[str, Any], ppo_config: dict[str, Any]
+) -> tuple[int, ...]:
     """Derives the observation shape a pair of stored configs implies.
 
     Args:

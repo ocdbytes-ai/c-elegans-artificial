@@ -12,16 +12,13 @@
 # NOTE: the toxin_smell channel widens the observation from 5 channels to 6
 # (20 -> 24 dims after frame stacking), so no world-v1 checkpoint can be
 # resumed into this. World v2 trains from scratch.
-#
-# Parameter reference: notes/training.md section 10.
 
 world:
   width: 20.0
   height: 20.0
   dt: 0.1                 # seconds of simulated time per step
   # "wrap" is a torus, where straight-line sweeping forages without sensing;
-  # "clamp" has walls, which the touch channel exists to perceive. See
-  # notes/training.md section 7.
+  # "clamp" has walls, which the touch channel exists to perceive.
   boundary: clamp
 
 worm:
@@ -60,8 +57,8 @@ food:
   # Judge it against the scent sigma (gaussian_sigma_scale * scent_radius),
   # not against eat_radius: past ~2 sigma the worm both starts every episode
   # outside its own sensory range and respawns each meal out of range, which
-  # turns every episode's opening into a blind walk. See notes/training.md
-  # section 7. At 2.0 this is ~1.4 sigma, still twice eat_radius.
+  # turns every episode's opening into a blind walk. At 2.0 this is ~1.4
+  # sigma, still twice eat_radius.
   min_spawn_distance: 2.0
 
 toxin:
@@ -113,6 +110,10 @@ reward:
 
 observation:
   include_energy: true
+  # Step-to-step change in scent, on its own channel. Adds no information the
+  # frame stack lacks, but arrives at the same scale as the other channels
+  # instead of about 4x quieter. See configs/world_v1.yaml.
+  include_smell_delta: true 
   # The v2 channel. Kept separate from food_smell deliberately: summed,
   # food-beside-toxin is numerically identical to strong food; signed, the two
   # cancel and the most dangerous spot in the arena reads as open water.

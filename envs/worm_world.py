@@ -93,6 +93,7 @@ class WormWorldEnv(gym.Env):
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
         self.observation_space = self._observation.space
         self.steps = 0
+        self._previous_food_smell = 0.0
 
     @property
     def observation_labels(self) -> list[str]:
@@ -117,6 +118,9 @@ class WormWorldEnv(gym.Env):
         self.toxin.reset(self.np_random, self.worm.position)
         self.metabolism.reset()
         self.steps = 0
+        # Seeded with the current reading so the first difference is 0 rather
+        # than a jump from whatever the last episode ended on.
+        self._previous_food_smell = float(self.food.scent_at(self.worm.position))
 
         observation = self._observe()
         if self.render_mode == "human":
@@ -189,8 +193,20 @@ class WormWorldEnv(gym.Env):
             self._renderer = None
 
     def _observe(self) -> np.ndarray:
-        """Reads the current observation."""
-        return self._observation(Sensors(self.worm, self.food, self.toxin, self.metabolism))
+        """Reads the current observation and remembers this step's scent."""
+        smell = float(self.food.scent_at(self.worm.position))
+        observation = self._observation(
+            Sensors(
+                self.worm,
+                self.food,
+                self.toxin,
+                self.metabolism,
+                food_smell=smell,
+                previous_food_smell=self._previous_food_smell,
+            )
+        )
+        self._previous_food_smell = smell
+        return observation
 
     def _info(self, eaten: int, moved: float) -> StepInfo:
         """Assembles the per-step diagnostics.

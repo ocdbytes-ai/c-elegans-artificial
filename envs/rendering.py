@@ -17,7 +17,7 @@ Scent, when enabled, is drawn as dotted iso-concentration rings, each marking a
 radius where the concentration halves. The rings are per pellet, which is a
 deliberate simplification: the true field is the *sum* over pellets, so where
 pellets overlap the real contours are not circles and their merged summit is
-not drawn at all. See ``notes/training.md``.
+not drawn at all.
 
 Imported lazily by the environment, so pygame is only needed to render.
 """

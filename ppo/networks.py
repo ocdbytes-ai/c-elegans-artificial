@@ -68,7 +68,7 @@ class GaussianActor(nn.Module):
     Spinning Up stores the std as a single parameter, which is the default here
     too. The worm can then choose where to aim but not how randomly to move.
     Klinokinesis needs the second, so ``state_dependent_std`` computes the std
-    from the observation instead. See ``notes/training.md``.
+    from the observation instead.
 
     Attributes:
         mu_net: Maps an observation to the action mean.

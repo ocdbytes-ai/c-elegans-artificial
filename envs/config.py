@@ -23,7 +23,7 @@ class WorldConfig:
         dt: Seconds of simulated time per step.
         boundary: ``"wrap"`` for a torus with no walls, or ``"clamp"`` for hard
             edges. The choice decides whether blind straight-line sweeping is a
-            viable foraging strategy; see ``notes/training.md``.
+            viable foraging strategy.
     """
 
     width: float = 20.0
@@ -136,7 +136,7 @@ class FoodConfig:
         eat_radius: Contact radius. Touching a pellet eats it.
         scent_radius: Sensory scale of the falloff. Pellets closer together than
             twice the profile's sigma merge into a single hill whose summit
-            holds no food; see ``notes/training.md``.
+            holds no food.
         scent_peak: Concentration at a pellet's exact centre.
         scent_profile: One of :data:`SCENT_PROFILES`; see :mod:`envs.scent`.
         gaussian_sigma_scale: Gaussian sigma as a fraction of ``scent_radius``.
@@ -293,6 +293,21 @@ class ObservationConfig:
 
     Attributes:
         include_energy: Interoception, required for hunger-modulated behaviour.
+        include_smell_level: Report the absolute scent concentration. Turning
+            this off while ``include_smell_delta`` is on leaves the worm a
+            purely phasic chemoreceptor: it senses change and never level. That
+            removes area-restricted search, which needs the level, and leaves
+            klinokinesis as the only chemotactic strategy available. The frame
+            stack cannot recover the level either, since summing k stacked
+            deltas gives a k-step change rather than an absolute value.
+        include_smell_delta: Report the change in scent since the last step on
+            its own channel. The network can already work this out from stacked
+            frames, so no information is added. What changes is scale: the
+            normaliser standardises whole channels, not differences taken from
+            them, so a difference computed from the stack arrives about 4x
+            quieter than the level. Klinokinesis needs that difference; area-
+            restricted search needs only the level, which is why the level wins
+            when the two compete.
         include_toxin: A second chemical sense, reporting toxin concentration on
             its own channel. Separate from ``food_smell`` because a summed or
             signed channel cannot be disentangled: summed, food-beside-toxin is
@@ -309,8 +324,17 @@ class ObservationConfig:
     """
 
     include_energy: bool = True
+    include_smell_level: bool = True
+    include_smell_delta: bool = False
     include_touch: bool = True
     include_toxin: bool = False
+
+    def __post_init__(self) -> None:
+        if not (self.include_smell_level or self.include_smell_delta):
+            raise ValueError(
+                "the worm needs at least one food channel: enable "
+                "include_smell_level, include_smell_delta, or both"
+            )
 
 
 @dataclass
