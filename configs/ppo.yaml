@@ -7,20 +7,7 @@
 network:
   hidden_sizes: [128, 128]
   activation: tanh
-  # Make sigma a network output instead of a bare parameter. With a fixed
-  # sigma the worm can change where it aims but not how randomly it acts, so
-  # klinokinesis — modulating the RATE of random reorientation with the
-  # chemical signal — cannot be expressed at all. It is also the only way a
-  # mirror-symmetric policy can do local search: a turn flips sign under
-  # reflection while concentration does not, so a concentration-driven turn
-  # has to go through the noise term.
-  state_dependent_std: true 
   log_std_init: -0.7
-  # Under state_dependent_std, log_std_min and log_std_max are the limits the
-  # network output is squashed into, and log_std_min can no longer be null.
-  # The gap between them is how much the worm may vary its own randomness,
-  # which is what klinokinesis needs. Default range: sigma 0.20 to 1.00.
-  log_std_max: 0.0
   # Floor on the policy std, clamped after every policy step. Sampling is the
   # only exploration PPO has and the surrogate always prefers narrowing it, so
   # an unfloored run collapsed sigma and its last 100 epochs learned nothing.
@@ -37,7 +24,7 @@ network:
 
 rollout:
   steps_per_epoch: 10000
-  epochs: 1000
+  epochs: 500 
   # The discount horizon 1/(1-gamma) must cover the lifespan, or eating moves
   # V(s) too little to learn from. This is the single most consequential
   # hyperparameter here.
@@ -45,7 +32,7 @@ rollout:
   gae_lambda: 0.97
   # Smell is one scalar: a single frame says "how much", never "more than
   # before". Stacking is what supplies the time axis chemotaxis needs.
-  frame_stack: 4
+  frame_stack: 4 
   # food_smell is far quieter than sin/cos spanning [-1, 1]; without this the
   # signal that matters is the faintest input the network sees.
   normalize_observations: true
@@ -60,7 +47,7 @@ optim:
   # Spinning Up's PPO has no entropy term — it computes entropy for logging
   # only. Under a survival reward, freezing is a strong early attractor. The
   # surrogate wins this negotiation regardless. Set to 0.0 to match spinup.
-  entropy_coef: 0.0 # disabling the entropy for runs that have std as model output 
+  entropy_coef: 0.01 
   max_grad_norm: 0.5      # 0 disables clipping
 
 curriculum:

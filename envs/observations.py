@@ -90,7 +90,9 @@ def build_channels(config: EnvConfig) -> list[Channel]:
 
     if config.observation.include_energy:
         # Interoception, required for any hunger-modulated behaviour.
-        channels.append(Channel("energy", 0.0, 1.0, lambda s: s.metabolism.energy_fraction))
+        channels.append(
+            Channel("energy", 0.0, 1.0, lambda s: s.metabolism.energy_fraction)
+        )
 
     # The ceiling covers the richest episode the world can draw. Unreachable in
     # practice, but it bounds the space honestly.
@@ -122,7 +124,10 @@ def build_channels(config: EnvConfig) -> list[Channel]:
         toxin_ceiling = max_possible_toxin(config.toxin)
         channels.append(
             Channel(
-                "toxin_smell", 0.0, toxin_ceiling, lambda s: float(s.toxin.scent_at(s.worm.position))
+                "toxin_smell",
+                0.0,
+                toxin_ceiling,
+                lambda s: float(s.toxin.scent_at(s.worm.position)),
             )
         )
 
@@ -135,8 +140,12 @@ def build_channels(config: EnvConfig) -> list[Channel]:
 
     # sin/cos rather than raw theta, so nearly identical headings are nearly
     # identical inputs instead of straddling the 0/2pi discontinuity.
-    channels.append(Channel("heading_sin", -1.0, 1.0, lambda s: s.worm.heading_sin_cos[0]))
-    channels.append(Channel("heading_cos", -1.0, 1.0, lambda s: s.worm.heading_sin_cos[1]))
+    channels.append(
+        Channel("heading_sin", -1.0, 1.0, lambda s: s.worm.heading_sin_cos[0])
+    )
+    channels.append(
+        Channel("heading_cos", -1.0, 1.0, lambda s: s.worm.heading_sin_cos[1])
+    )
 
     return channels
 

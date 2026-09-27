@@ -26,23 +26,13 @@ class NetworkConfig:
         hidden_sizes: Widths of the shared hidden-layer shape, used for both the
             policy and the critic.
         activation: One of :data:`ACTIVATIONS`.
-        state_dependent_std: Compute the standard deviation from the
-            observation instead of storing it as one parameter. A fixed sigma
-            lets the worm change where it aims but not how randomly it moves.
-            Klinokinesis needs the second, so it cannot be learned without
-            this.
         log_std_init: Starting log standard deviation. The default gives sigma
-            ~0.61. Under ``state_dependent_std`` the head is set up to return
-            this value for every observation, so both modes start the same.
+            ~0.61.
         log_std_min: Lowest log standard deviation allowed, or None to disable.
             Sampling is the only exploration PPO has, and the surrogate loss
             always prefers a narrower one: an unfloored run fell from sigma
             0.607 to [0.269, 0.191]. Evaluation uses the mean, so a floor costs
-            nothing there. Required under ``state_dependent_std``.
-        log_std_max: Highest log standard deviation allowed. Only used under
-            ``state_dependent_std``. The gap between the two limits is how much
-            the worm may vary its own randomness, which is what klinokinesis
-            needs. The default spans sigma 0.20 to 1.00.
+            nothing there.
         mean_bias_init: Initial bias per action dimension, here
             ``[turn, throttle]``, or None to leave the network's own init alone.
             A zero-mean throttle cancels forward against backward and leaves an
@@ -55,10 +45,8 @@ class NetworkConfig:
 
     hidden_sizes: tuple[int, ...] = (64, 64)
     activation: str = "tanh"
-    state_dependent_std: bool = False
     log_std_init: float = -0.5
     log_std_min: float | None = -1.2
-    log_std_max: float = 0.0
     mean_bias_init: tuple[float, ...] | None = (0.0, 0.5)
 
     def __post_init__(self) -> None:
@@ -74,25 +62,6 @@ class NetworkConfig:
                 f"log_std_min ({self.log_std_min}) is above log_std_init "
                 f"({self.log_std_init}); the policy would start clamped"
             )
-        if self.state_dependent_std:
-            # A network output has no natural limits, so both ends are needed.
-            # log_prob contains -log(sigma), which blows up as sigma reaches 0.
-            if self.log_std_min is None:
-                raise ValueError(
-                    "state_dependent_std needs a value for log_std_min, not null: "
-                    "it sets the bottom of the range the head can output"
-                )
-            if self.log_std_max <= self.log_std_min:
-                raise ValueError(
-                    f"log_std_max ({self.log_std_max}) must be above log_std_min "
-                    f"({self.log_std_min})"
-                )
-            if not self.log_std_min < self.log_std_init < self.log_std_max:
-                raise ValueError(
-                    f"log_std_init ({self.log_std_init}) must be between log_std_min "
-                    f"({self.log_std_min}) and log_std_max ({self.log_std_max}), so the "
-                    f"head can move in either direction"
-                )
 
 
 @dataclass

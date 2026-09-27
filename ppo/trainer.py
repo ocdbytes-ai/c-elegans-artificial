@@ -317,31 +317,8 @@ class PPOTrainer:
             "delta_loss_v": loss_v_end - loss_v_start,
             "stop_iter": stop_iter,
             "value_mean": float(data["ret"].mean()),
-            **self._std_diagnostics(data["obs"]),
+            "log_std": float(self.ac.pi.log_std.detach().mean()),
             **diagnostics,
-        }
-
-    @torch.no_grad()
-    def _std_diagnostics(self, obs: torch.Tensor) -> dict[str, float]:
-        """Summarises the policy's standard deviation over one epoch.
-
-        ``log_std_spread`` is how much the std changes from one observation to
-        the next. It is always 0 when the std is a single parameter. When it is
-        a network output, a spread near 0 means the worm is not varying its
-        randomness, so it has not learned klinokinesis.
-
-        Args:
-            obs: The epoch's observations.
-
-        Returns:
-            The mean log standard deviation and its spread across observations.
-        """
-        log_std = self.ac.pi.log_std_of(obs)
-        if log_std.dim() == 1:  # bare parameter: identical for every observation
-            return {"log_std": float(log_std.mean()), "log_std_spread": 0.0}
-        return {
-            "log_std": float(log_std.mean()),
-            "log_std_spread": float(log_std.mean(dim=-1).std()),
         }
 
     # -- run ---------------------------------------------------------------

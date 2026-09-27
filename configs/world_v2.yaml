@@ -44,7 +44,7 @@ randomization:
   food_count_scale: [0.5, 1.5]
 
 food:
-  count: 12
+  count: 5
   eat_radius: 1.0         # contact radius; touch a pellet and it is eaten
   scent_radius: 4.0       # sensory radius; must exceed eat_radius to be followable
   scent_peak: 1.0         # concentration at a pellet's exact centre
@@ -76,7 +76,7 @@ toxin:
   # 8 sources at food's own radius sounds balanced and is not: a third of the
   # world is worse than open water and the safe policy is to stop foraging.
   # At 5, avoidance is worth learning while foraging is still the main task.
-  count: 5
+  count: 2 
   # At full concentration this is 7.5x basal_cost, so sitting on a source burns
   # a full worm in ~35 steps: harsh enough to matter, slow enough that the
   # association is learnable rather than instantly fatal.
@@ -110,6 +110,14 @@ reward:
 
 observation:
   include_energy: true
+  # Absolute scent concentration. Turn this off with include_smell_delta on to
+  # give the worm a purely phasic sense: it feels change and never level. That
+  # removes area-restricted search, which needs the level, and leaves
+  # klinokinesis as the only chemotactic strategy. Note the level is still
+  # partly inferable from the deltas (R^2 ~ 0.69), since a Gaussian's gradient
+  # magnitude scales with its height, so this makes ARS expensive rather than
+  # impossible.
+  include_smell_level: true
   # Step-to-step change in scent, on its own channel. Adds no information the
   # frame stack lacks, but arrives at the same scale as the other channels
   # instead of about 4x quieter. See configs/world_v1.yaml.

@@ -277,34 +277,6 @@ def test_actor_critic_shapes():
     env.close()
 
 
-def test_state_dependent_std_starts_flat_and_stays_bounded():
-    """Both properties break training if lost.
-
-    Starting at ``log_std_init`` everywhere is what makes a run comparable with
-    the single-parameter version. Staying inside the limits matters more:
-    log_prob contains -log(sigma), which goes to infinity as sigma reaches 0.
-    """
-    config = PPOConfig.from_dict(
-        {**FAST_RUN, "network": {"state_dependent_std": True, "log_std_min": -1.6}}
-    )
-    env, _ = make_env(ppo_config=config)
-    ac = ActorCritic(env.observation_space, env.action_space, config.network)
-    obs = torch.randn(256, int(np.prod(env.observation_space.shape)))
-
-    log_std = ac.pi.log_std_of(obs)
-    assert torch.allclose(
-        log_std, torch.full_like(log_std, config.network.log_std_init), atol=1e-5
-    ), "the head must emit log_std_init for every observation before training"
-
-    # Absurd weights: a clamp would sit exactly on the bound, squashing keeps it inside.
-    with torch.no_grad():
-        ac.pi.log_std_net[-1].weight.normal_(0.0, 50.0)
-    log_std = ac.pi.log_std_of(obs)
-    assert log_std.min() >= config.network.log_std_min - 1e-6
-    assert log_std.max() <= config.network.log_std_max + 1e-6
-    env.close()
-
-
 def test_log_std_floor_holds_through_training(trainer):
     """Exploration must not be able to collapse, whatever the loss prefers."""
     floor = trainer.config.network.log_std_min

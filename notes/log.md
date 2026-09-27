@@ -66,4 +66,11 @@ Stage 2 of the project was to add a sense for toxins and that was very simple co
 
 Problem during the implementation and training :
 
-I added the damage from toxins as a huge multiplier of `1.5` now the problem is that the worm kind of is scared and not bold enough to take risks and actually go look out for food in order to survive so I tried decreasing the multiplier to `0.8` to see if worm starts taking risk or not --> I saw increase in lifespan by making the worm more confident and actually risk taking. If talking about numbers I saw about 24 % increase in lifespan in the trained policy.  
+I added the damage from toxins as a huge multiplier of `1.5` now the problem is that the worm kind of is scared and not bold enough to take risks and actually go look out for food in order to survive so I tried decreasing the multiplier to `0.8` to see if worm starts taking risk or not --> I saw increase in lifespan by making the worm more confident and actually risk taking. If talking about numbers I saw about 24 % increase in lifespan in the trained policy. 
+
+## Stage 3 
+
+It has been several weeks since I came back to this project because of some other work. So I did an analysis of Klinokinesis (Should be attracted towards the food and away from toxin. Worm should head in "good" direction) and Klinotaxis (Should be not turning much when heading towards food. The heading should be straight.)
+
+I have a whole document at : [Klinokinesis and Klinotaxis Analysis](./klinokinesis-and-klinotaxis.md) 
+One can get through the document and see what is actually happening when worm is trained. 

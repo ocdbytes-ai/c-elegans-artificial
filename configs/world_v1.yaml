@@ -86,6 +86,14 @@ reward:
 
 observation:
   include_energy: true
+  # Absolute scent concentration. Turn this off with include_smell_delta on to
+  # give the worm a purely phasic sense: it feels change and never level. That
+  # removes area-restricted search, which needs the level, and leaves
+  # klinokinesis as the only chemotactic strategy. Note the level is still
+  # partly inferable from the deltas (R^2 ~ 0.69), since a Gaussian's gradient
+  # magnitude scales with its height, so this makes ARS expensive rather than
+  # impossible.
+  include_smell_level: true
   # Report the step-to-step change in scent on its own channel. The network can
   # already derive this from stacked frames, so no information is added. What
   # changes is scale: the normaliser standardises channels, not differences
