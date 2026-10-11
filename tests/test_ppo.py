@@ -57,6 +57,7 @@ def test_shipped_yaml_documents_every_field(assert_yaml_covers_config):
         ),
         ({"curriculum": {"metabolism_scale_start": 0.5}}, "metabolism_scale_start must be >= 1"),
         ({"curriculum": {"anneal_fraction": 0.0}}, "anneal_fraction"),
+        ({"network": {"tanh_mean": True, "mean_bias_init": [0.0, 1.0]}}, "tanh_mean"),
     ],
 )
 def test_bad_hyperparameters_are_rejected(overrides, message):
@@ -340,6 +341,43 @@ def test_mean_bias_can_be_disabled_and_is_validated():
     with pytest.raises(ValueError, match="one bias per action"):
         ActorCritic(env.observation_space, env.action_space, bad.network)
     env.close()
+
+
+def test_tanh_mean_keeps_the_initial_bias_and_never_leaves_the_bounds():
+    config = PPOConfig.from_dict({**FAST_RUN, "network": {"tanh_mean": True}})
+    env, _ = make_env(ppo_config=config)
+    ac = ActorCritic(env.observation_space, env.action_space, config.network)
+    obs = torch.zeros(env.observation_space.shape, dtype=torch.float32)
+    head = ac.pi.mu_net[-1]
+
+    # With the head's weights zeroed the mean is tanh(bias) alone, so this
+    # checks the atanh inversion lands exactly on the configured prior.
+    with torch.no_grad():
+        head.weight.zero_()
+    np.testing.assert_allclose(
+        ac.act(obs, deterministic=True), config.network.mean_bias_init, atol=1e-6
+    )
+
+    with torch.no_grad():
+        head.bias.fill_(50.0)
+    assert np.all(np.abs(ac.act(obs, deterministic=True)) <= 1.0)
+    env.close()
+
+
+def test_learning_rates_anneal_linearly_and_reset_on_resume(trainer):
+    trainer.config.optim.anneal_lr = True
+    trainer.config.rollout.epochs = 4
+    optim = trainer.config.optim
+
+    trainer._set_learning_rates(3)
+    assert trainer.pi_optimizer.param_groups[0]["lr"] == pytest.approx(0.5 * optim.policy_lr)
+    assert trainer.vf_optimizer.param_groups[0]["lr"] == pytest.approx(0.5 * optim.value_lr)
+
+    # A resumed run with annealing off must not keep the annealed rate that
+    # Adam's state_dict carried over.
+    trainer.config.optim.anneal_lr = False
+    trainer._set_learning_rates(3)
+    assert trainer.pi_optimizer.param_groups[0]["lr"] == optim.policy_lr
 
 
 def test_deterministic_act_is_the_distribution_mean():

@@ -2,7 +2,8 @@
 
 A plain MLP with a Gaussian policy, following Spinning Up's ``MLPActorCritic``.
 Actions are sampled without squashing, so the environment applies its own
-bounds.
+bounds. ``tanh_mean`` squashes only the mean, never the sample, so the
+log-probability stays that of a plain Gaussian.
 
 The policy standard deviation is a single learned parameter, as in that
 reference, which keeps runs comparable against a known-good version.
@@ -49,6 +50,7 @@ class GaussianActor(nn.Module):
         mu_net: Maps an observation to the action mean.
         log_std: The log standard deviation parameter.
         log_std_min: Lowest log standard deviation allowed, or None.
+        tanh_mean: Whether the mean is squashed into (-1, 1).
     """
 
     def __init__(self, obs_dim: int, act_dim: int, config: NetworkConfig):
@@ -67,6 +69,7 @@ class GaussianActor(nn.Module):
         activation = _ACTIVATIONS[config.activation]
         self.mu_net = build_mlp([obs_dim, *config.hidden_sizes, act_dim], activation)
         self.log_std_min = config.log_std_min
+        self.tanh_mean = config.tanh_mean
 
         self.log_std = nn.Parameter(
             torch.full((act_dim,), float(config.log_std_init), dtype=torch.float32)
@@ -80,8 +83,10 @@ class GaussianActor(nn.Module):
                     f"space has {act_dim} dimensions; give one bias per action."
                 )
             # A starting point only. Training moves it like any other weight.
+            # Under tanh_mean the bias sits before the squash, so it is
+            # inverted to give the same starting mean.
             with torch.no_grad():
-                self.mu_net[-1].bias.copy_(bias)
+                self.mu_net[-1].bias.copy_(torch.atanh(bias) if self.tanh_mean else bias)
 
     def distribution(self, obs: torch.Tensor) -> Normal:
         """Returns the action distribution for an observation.
@@ -92,7 +97,10 @@ class GaussianActor(nn.Module):
         Returns:
             A diagonal Gaussian over actions.
         """
-        return Normal(self.mu_net(obs), torch.exp(self.log_std))
+        mean = self.mu_net(obs)
+        if self.tanh_mean:
+            mean = torch.tanh(mean)
+        return Normal(mean, torch.exp(self.log_std))
 
     @torch.no_grad()
     def clamp_log_std(self) -> None:

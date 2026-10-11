@@ -318,8 +318,28 @@ class PPOTrainer:
             "stop_iter": stop_iter,
             "value_mean": float(data["ret"].mean()),
             "log_std": float(self.ac.pi.log_std.detach().mean()),
+            "policy_lr": self.pi_optimizer.param_groups[0]["lr"],
             **diagnostics,
         }
+
+    def _set_learning_rates(self, epoch: int) -> None:
+        """Sets both optimisers' rates for an epoch, annealed if configured.
+
+        Set every epoch, annealing or not, so a resumed run trains at this
+        config's rates rather than the ones stored in the checkpoint's Adam
+        state.
+
+        Args:
+            epoch: One-based epoch number.
+        """
+        optim = self.config.optim
+        fraction = optim.lr_fraction(epoch, self.config.rollout.epochs)
+        for optimizer, lr in (
+            (self.pi_optimizer, optim.policy_lr),
+            (self.vf_optimizer, optim.value_lr),
+        ):
+            for group in optimizer.param_groups:
+                group["lr"] = fraction * lr
 
     # -- run ---------------------------------------------------------------
 
@@ -343,6 +363,7 @@ class PPOTrainer:
                     self.env_config, epoch, self.config.rollout.epochs
                 )
                 stats = self.collect()
+                self._set_learning_rates(epoch)
                 update_info = self.update()
                 eval_info = self._maybe_keep_best(epoch)
                 evaluated = not np.isnan(eval_info["eval_lifespan"])

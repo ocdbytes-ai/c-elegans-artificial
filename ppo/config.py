@@ -41,6 +41,13 @@ class NetworkConfig:
             to 0.5 gives 9.56 units and cv 0.58. 0.5 rather than 1.0 keeps the
             mean off the action bound, so exploration noise is not half clipped
             from the first step. A prior, not a constraint.
+        tanh_mean: Pass the action mean through tanh, holding it inside the
+            ``[-1, 1]`` action bounds. The environment clips actions, so a mean
+            beyond a bound changes nothing the worm does and receives no
+            gradient pulling it back; v5's mean |action| drifted from 0.48 to
+            1.24 while its score fell from 1973 to 1256. Samples can still
+            land outside and are clipped as before. Every ``mean_bias_init``
+            entry must then lie strictly inside (-1, 1).
     """
 
     hidden_sizes: tuple[int, ...] = (64, 64)
@@ -48,6 +55,7 @@ class NetworkConfig:
     log_std_init: float = -0.5
     log_std_min: float | None = -1.2
     mean_bias_init: tuple[float, ...] | None = (0.0, 0.5)
+    tanh_mean: bool = False
 
     def __post_init__(self) -> None:
         self.hidden_sizes = tuple(int(size) for size in self.hidden_sizes)
@@ -61,6 +69,11 @@ class NetworkConfig:
             raise ValueError(
                 f"log_std_min ({self.log_std_min}) is above log_std_init "
                 f"({self.log_std_init}); the policy would start clamped"
+            )
+        if self.tanh_mean and any(abs(b) >= 1 for b in self.mean_bias_init or ()):
+            raise ValueError(
+                f"tanh_mean keeps the action mean inside (-1, 1), so mean_bias_init "
+                f"{self.mean_bias_init} is unreachable"
             )
 
 
@@ -116,6 +129,11 @@ class OptimConfig:
             freeze policy is a strong early attractor. Set to 0.0 to match
             spinup exactly.
         max_grad_norm: Gradient-norm clip, or 0 to disable.
+        anneal_lr: Scale both learning rates linearly from their full value on
+            the first epoch to ``1/epochs`` of it on the last, as CleanRL's PPO
+            does by default, so late updates cannot undo a good policy. Restarts
+            from the full rate on ``--resume``, since each run counts its own
+            epochs.
     """
 
     clip_ratio: float = 0.2
@@ -126,6 +144,7 @@ class OptimConfig:
     target_kl: float = 0.015
     entropy_coef: float = 0.01
     max_grad_norm: float = 0.5
+    anneal_lr: bool = False
 
     def __post_init__(self) -> None:
         if self.clip_ratio <= 0:
@@ -136,6 +155,21 @@ class OptimConfig:
             raise ValueError("policy_iters and value_iters must be >= 1")
         if self.entropy_coef < 0 or self.max_grad_norm < 0:
             raise ValueError("entropy_coef and max_grad_norm must be non-negative")
+
+    def lr_fraction(self, epoch: int, total_epochs: int) -> float:
+        """Computes the share of the configured learning rates used this epoch.
+
+        Args:
+            epoch: One-based epoch number.
+            total_epochs: Total epochs in the run.
+
+        Returns:
+            1.0 on the first epoch, falling linearly to ``1/total_epochs`` on
+            the last, and 1.0 throughout when annealing is off.
+        """
+        if not self.anneal_lr:
+            return 1.0
+        return 1.0 - (epoch - 1) / total_epochs
 
 
 @dataclass

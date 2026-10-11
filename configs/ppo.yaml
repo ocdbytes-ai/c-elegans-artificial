@@ -6,7 +6,7 @@
 
 network:
   hidden_sizes: [128, 128]
-  activation: relu
+  activation: tanh
   log_std_init: -0.7
   # Floor on the policy std, clamped after every policy step. Sampling is the
   # only exploration PPO has and the surrogate always prefers narrowing it, so
@@ -21,6 +21,11 @@ network:
   # noise is not half clipped away from step one. A prior, not a constraint:
   # reversing remains learnable. null leaves the network's own init untouched.
   mean_bias_init: [0.0, 0.5]
+  # Squash the action mean with tanh so it cannot drift past the [-1, 1]
+  # bounds, where the env clips it and no gradient pulls it back. v5's mean
+  # |action| rose 0.48 -> 1.24 while its score fell 1973 -> 1256. Only the mean
+  # is squashed; samples are still clipped by the env.
+  tanh_mean: true
 
 rollout:
   steps_per_epoch: 10000
@@ -49,6 +54,9 @@ optim:
   # surrogate wins this negotiation regardless. Set to 0.0 to match spinup.
   entropy_coef: 0.01 
   max_grad_norm: 0.5      # 0 disables clipping
+  # Scale both learning rates linearly from full on epoch 1 to 1/epochs of it
+  # on the last (CleanRL's default), so late updates cannot undo a good policy.
+  anneal_lr: true
 
 curriculum:
   # Start forgiving and tighten toward the world in the env config, which

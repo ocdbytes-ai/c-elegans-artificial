@@ -2,6 +2,7 @@
 
     uv run python scripts/play.py --policy greedy --render
     uv run python scripts/play.py --policy freeze --episodes 20
+    uv run python scripts/play.py --policy greedy --render --loop
 
 These are the baselines a trained worm has to beat. Two of them are traps PPO
 will find on its own if the world allows it, and neither senses anything:
@@ -29,7 +30,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import gymnasium as gym
 
-from envs import ENV_ID, UNLIMITED_EPISODE_STEPS
+from common.cli import positive_int
+from envs import ENV_ID, MAX_EPISODE_STEPS, UNLIMITED_EPISODE_STEPS
 from envs.config import EnvConfig
 from envs.episodes import EpochStats, episode_line, run_episodes, summary_line
 from envs.geometry import wrap_angle
@@ -111,6 +113,8 @@ def greedy_policy(env: gym.Env):
     return act
 
 
+DEFAULT_EPISODES = 3
+
 POLICIES = {
     "random": random_policy,
     "freeze": freeze_policy,
@@ -119,15 +123,33 @@ POLICIES = {
 }
 
 
-def main() -> None:
-    """Runs the selected baseline and prints its statistics."""
-    parser = argparse.ArgumentParser(description=__doc__)
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parses the command line.
+
+    Args:
+        argv: Arguments without the program name, or None for ``sys.argv``.
+
+    Returns:
+        The parsed flags.
+    """
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--policy", default="random", choices=sorted(POLICIES))
-    parser.add_argument(
+    # None rather than the real default: argparse's mutual-exclusion check
+    # ignores a value identical to the default, so `--loop --episodes 3`
+    # would otherwise be accepted and loop.
+    count = parser.add_mutually_exclusive_group()
+    count.add_argument(
         "--episodes",
-        type=int,
-        default=3,
-        help="episodes to run, or 0 to keep going until stopped",
+        type=positive_int,
+        default=None,
+        help=f"episodes to run (default: {DEFAULT_EPISODES})",
+    )
+    count.add_argument(
+        "--loop",
+        action="store_true",
+        help="keep starting episodes until the window is closed or Ctrl-C is pressed",
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--config", default=None, help="path to a YAML config")
@@ -137,14 +159,28 @@ def main() -> None:
         action="store_true",
         help="draw pellets at their true eat radius, with scent contours",
     )
-    parser.add_argument(
+    length = parser.add_mutually_exclusive_group()
+    length.add_argument(
         "--max-steps",
-        type=int,
+        type=positive_int,
         default=None,
-        help="override the step cap per episode, or 0 to let a life run until "
-        "the worm starves",
+        help=f"step cap per episode (default: {MAX_EPISODE_STEPS})",
     )
-    args = parser.parse_args()
+    length.add_argument(
+        "--no-step-limit",
+        action="store_true",
+        help="no step cap: every life runs until the worm dies",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Runs the selected baseline and prints its statistics.
+
+    Args:
+        argv: Arguments without the program name, or None for ``sys.argv``.
+    """
+    args = parse_args(argv)
 
     # Resolved here rather than inside the env so --debug can be applied on top
     # of whatever --config names, without either flag having to know about the
@@ -156,9 +192,7 @@ def main() -> None:
         ENV_ID,
         config=config,
         render_mode="human" if args.render else None,
-        max_episode_steps=(
-            UNLIMITED_EPISODE_STEPS if args.max_steps == 0 else args.max_steps
-        ),
+        max_episode_steps=UNLIMITED_EPISODE_STEPS if args.no_step_limit else args.max_steps,
     )
     print(f"obs={env.unwrapped.observation_labels}  policy={args.policy}")
 
@@ -172,7 +206,7 @@ def main() -> None:
         run_episodes(
             env,
             POLICIES[args.policy](env),
-            episodes=args.episodes or None,
+            episodes=None if args.loop else args.episodes or DEFAULT_EPISODES,
             seed=args.seed,
             on_episode=report,
             stop=(lambda: env.unwrapped.window_closed) if args.render else None,

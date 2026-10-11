@@ -26,6 +26,7 @@ from .worm_world import WormWorldEnv
 
 __all__ = [
     "ENV_ID",
+    "MAX_EPISODE_STEPS",
     "UNLIMITED_EPISODE_STEPS",
     "EnvConfig",
     "EpisodeSummary",

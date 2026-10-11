@@ -17,7 +17,7 @@ Typical use::
 
 or from the command line::
 
-    uv run python train.py --epochs 300
+    uv run python scripts/train.py --epochs 300
 """
 
 from .buffer import RolloutBuffer

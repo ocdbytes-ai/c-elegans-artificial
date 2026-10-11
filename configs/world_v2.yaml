@@ -4,7 +4,7 @@
 # what is new is that some of the arena costs energy to occupy, and the worm can
 # smell it on a channel of its own.
 #
-#   uv run python train.py --env-config configs/world_v2.yaml --name toxins
+#   uv run python scripts/train.py --env-config configs/world_v2.yaml --name toxins
 #
 # A complete file, like world_v1.yaml — every field is named (tests/test_env.py
 # enforces that), though a YAML passed to the env may be partial.

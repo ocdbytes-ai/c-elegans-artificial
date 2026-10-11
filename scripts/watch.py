@@ -2,6 +2,7 @@
 
     uv run python scripts/watch.py experiments/ppo_s0/checkpoints/latest.pt
     uv run python scripts/watch.py <checkpoint> --episodes 20 --no-render
+    uv run python scripts/watch.py <checkpoint> --loop --no-step-limit
     uv run python scripts/watch.py <checkpoint> --env-config configs/bigger.yaml
 
 The world is rebuilt from the config stored inside the checkpoint, not from
@@ -26,10 +27,13 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from envs import UNLIMITED_EPISODE_STEPS
+from common.cli import positive_int
+from envs import MAX_EPISODE_STEPS, UNLIMITED_EPISODE_STEPS
 from envs.episodes import EpochStats, episode_line, run_episodes, summary_line
 from ppo import load_policy
 from ppo.tui import ActorTUI
+
+DEFAULT_EPISODES = 5
 
 
 def describe_overrides(stored: dict, overrides: dict) -> list[str]:
@@ -59,16 +63,33 @@ def describe_overrides(stored: dict, overrides: dict) -> list[str]:
     return changes
 
 
-def main() -> None:
-    """Loads a checkpoint and rolls its policy out, rendering by default."""
-    parser = argparse.ArgumentParser(description=__doc__)
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parses the command line.
+
+    Args:
+        argv: Arguments without the program name, or None for ``sys.argv``.
+
+    Returns:
+        The parsed flags.
+    """
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("checkpoint", help="path to a .pt checkpoint")
-    parser.add_argument(
+    # None rather than the real default: argparse's mutual-exclusion check
+    # ignores a value identical to the default, so `--loop --episodes 5`
+    # would otherwise be accepted and loop.
+    count = parser.add_mutually_exclusive_group()
+    count.add_argument(
         "--episodes",
-        type=int,
-        default=5,
-        help="episodes to run, or 0 to keep going until the window is closed "
-        "or Ctrl-C is pressed",
+        type=positive_int,
+        default=None,
+        help=f"episodes to run (default: {DEFAULT_EPISODES})",
+    )
+    count.add_argument(
+        "--loop",
+        action="store_true",
+        help="keep starting episodes until the window is closed or Ctrl-C is pressed",
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--no-render", action="store_true", help="measure instead of watch")
@@ -82,12 +103,17 @@ def main() -> None:
         action="store_true",
         help="draw pellets at their true eat radius, with scent contours",
     )
-    parser.add_argument(
+    length = parser.add_mutually_exclusive_group()
+    length.add_argument(
         "--max-steps",
-        type=int,
+        type=positive_int,
         default=None,
-        help="override the step cap per episode, or 0 to let a life run until "
-        "the worm starves",
+        help=f"step cap per episode (default: {MAX_EPISODE_STEPS})",
+    )
+    length.add_argument(
+        "--no-step-limit",
+        action="store_true",
+        help="no step cap: every life runs until the worm dies",
     )
     parser.add_argument(
         "--env-config",
@@ -100,7 +126,16 @@ def main() -> None:
         action="store_true",
         help="do not draw the actor network in the terminal",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Loads a checkpoint and rolls its policy out, rendering by default.
+
+    Args:
+        argv: Arguments without the program name, or None for ``sys.argv``.
+    """
+    args = parse_args(argv)
 
     overrides: dict[str, Any] = {}
     if args.env_config:
@@ -113,9 +148,7 @@ def main() -> None:
         args.checkpoint,
         render_mode=None if args.no_render else "human",
         env_overrides=overrides or None,
-        max_episode_steps=(
-            UNLIMITED_EPISODE_STEPS if args.max_steps == 0 else args.max_steps
-        ),
+        max_episode_steps=UNLIMITED_EPISODE_STEPS if args.no_step_limit else args.max_steps,
     )
 
     if args.env_config:
@@ -167,7 +200,7 @@ def main() -> None:
         run_episodes(
             env,
             policy,
-            episodes=args.episodes or None,
+            episodes=None if args.loop else args.episodes or DEFAULT_EPISODES,
             seed=args.seed,
             on_episode=report,
             stop=None if args.no_render else lambda: env.unwrapped.window_closed,
@@ -198,9 +231,9 @@ def main() -> None:
         f"(initial_energy {metabolism.initial_energy:g} / basal_cost {metabolism.basal_cost:g}). "
         f"Compare against scripts/play.py --policy straight too."
     )
-    if args.episodes < 20:
+    if len(stats.episodes) < 20:
         print(
-            f"note: {args.episodes} episodes is not a measurement — lifespan here has a "
+            f"note: {len(stats.episodes)} episodes is not a measurement — lifespan here has a "
             f"standard deviation of roughly its own mean. Use --episodes 50 to compare runs."
         )
 
