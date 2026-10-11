@@ -6,7 +6,7 @@
 
 network:
   hidden_sizes: [128, 128]
-  activation: tanh
+  activation: relu
   log_std_init: -0.7
   # Floor on the policy std, clamped after every policy step. Sampling is the
   # only exploration PPO has and the surrogate always prefers narrowing it, so

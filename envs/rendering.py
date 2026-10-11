@@ -432,5 +432,7 @@ class PygameRenderer:
 
         if render.debug:
             # The body is decoration; this ring is the point the physics
-            # integrates, which is what senses scent and what eats.
+            # integrates, which is what eats, and the dot is where it smells.
+            # The two coincide unless the head sweeps.
             pygame.draw.circle(self.surface, WHITE, self.to_screen(worm.position), 5, width=1)
+            pygame.draw.circle(self.surface, WHITE, self.to_screen(worm.head_position), 2)

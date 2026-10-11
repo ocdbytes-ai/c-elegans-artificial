@@ -22,6 +22,17 @@ worm:
   # food.eat_radius. This is the body's half-width at its thickest, so the
   # drawn worm is 2 * radius across against render.worm_body_length long.
   radius: 0.08
+  # Head sweep: the chemosensors ride on a head that swings sideways while
+  # the worm crawls, as the animal's does. A point sensor only reads
+  # cos(bearing), so food on the left and on the right smell identical; the
+  # sweep adds a cos(phase) * sin(bearing) term to the change in smell, which
+  # is the side information weathervane steering (klinotaxis) needs. Keep the
+  # amplitude well under the scent sigma (scent_radius * gaussian_sigma_scale)
+  # so the head samples a local slope. 0 makes the worm a point again.
+  head_sweep_amplitude: 0.0
+  # Seconds per full left-right-left sweep; the animal's head swing is about
+  # 0.5-1 s. Must span at least 4 steps of world.dt to be sampled at all.
+  head_sweep_period: 0.8
 
 randomization:
   # Multipliers on the nominal values above, redrawn every reset. The worm is
@@ -108,10 +119,19 @@ observation:
   # learned. Turning this on changes the observation width, which invalidates
   # every checkpoint trained without it.
   include_toxin: false
+  # Step-to-step change in toxin concentration, on its own channel, for the
+  # same scaling reason as include_smell_delta. Under the head sweep it also
+  # carries which side the toxin is on, so avoidance can steer rather than
+  # only reverse.
+  include_toxin_delta: false
   # Mechanosensation. Under boundary: clamp a wall is otherwise invisible — the
   # worm cannot tell it has stopped moving, so it cannot learn to turn away.
   # Constant 0 under wrap.
   include_touch: true
+  # Proprioception of the head sweep: sin and cos of its phase. Reading the
+  # side of the gradient out of the smell means knowing which way the head was
+  # swinging when it rose. Requires worm.head_sweep_amplitude above 0.
+  include_head_phase: false
 
 render:
   window_size: 700

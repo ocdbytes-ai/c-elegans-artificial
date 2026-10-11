@@ -48,6 +48,9 @@ class Worm:
         max_turn_rate: This episode's turn-rate ceiling.
         blocked: Share of the last step's commanded motion the boundary
             refused, which the ``touch`` observation channel reports.
+        phase: Head sweep phase in radians. The head is on the worm's left
+            while ``sin(phase)`` is positive. Stays 0 at reset when the worm
+            does not sweep.
     """
 
     def __init__(
@@ -68,6 +71,7 @@ class Worm:
         self.max_speed = config.max_speed
         self.max_turn_rate = config.max_turn_rate
         self.blocked = 0.0
+        self.phase = 0.0
 
     def reset(self, rng: np.random.Generator) -> None:
         """Places the worm randomly and draws a fresh body for the episode.
@@ -79,6 +83,11 @@ class Worm:
         self.heading = float(rng.uniform(-np.pi, np.pi))
         self.max_speed, self.max_turn_rate = self._sample_actuation(rng)
         self.blocked = 0.0
+        # Drawn only when sweeping. Food and toxin are scattered from the same
+        # RNG right after this, so an unconditional draw would move every
+        # pellet and make old seeds give different worlds.
+        sweeping = self.config.head_sweep_amplitude > 0
+        self.phase = float(rng.uniform(-np.pi, np.pi)) if sweeping else 0.0
 
     def _sample_actuation(self, rng: np.random.Generator) -> tuple[float, float]:
         """Draws this episode's speed and turn-rate ceilings.
@@ -134,6 +143,11 @@ class Worm:
         )
         # Snap float residue so unobstructed motion rests at exactly zero.
         self.blocked = 0.0 if blocked < 1e-9 else blocked
+        # Advanced by time, not distance: a fixed rhythm the policy steers on
+        # top of, so a worm that has stopped still samples both sides.
+        self.phase = float(
+            geometry.wrap_angle(self.phase + 2.0 * np.pi * dt / self.config.head_sweep_period)
+        )
         return MoveResult(
             turn_rate=turn_rate, speed=speed, distance=travelled, blocked=self.blocked
         )
@@ -142,3 +156,23 @@ class Worm:
     def heading_sin_cos(self) -> tuple[float, float]:
         """Heading as ``(sin, cos)``, avoiding the 0/2pi discontinuity."""
         return float(np.sin(self.heading)), float(np.cos(self.heading))
+
+    @property
+    def head_position(self) -> np.ndarray:
+        """Where the chemosensors are: the body point, swung sideways by the sweep.
+
+        The swing runs along the left-hand normal ``(-sin(heading),
+        cos(heading))`` with length ``head_sweep_amplitude * sin(phase)``. The
+        arena boundary applies to the head as it does to the body, so under
+        ``clamp`` the head cannot sense through a wall. Equal to ``position``
+        when the worm does not sweep.
+        """
+        sin_heading, cos_heading = self.heading_sin_cos
+        swing = self.config.head_sweep_amplitude * np.sin(self.phase)
+        head = self.position + swing * np.array([-sin_heading, cos_heading])
+        return geometry.apply_boundary(head, self.world.size, self.world.boundary)
+
+    @property
+    def head_phase_sin_cos(self) -> tuple[float, float]:
+        """Sweep phase as ``(sin, cos)``, for the proprioception channels."""
+        return float(np.sin(self.phase)), float(np.cos(self.phase))

@@ -29,11 +29,13 @@ class WorldConfig:
     width: float = 20.0
     height: float = 20.0
     dt: float = 0.1
-    boundary: str = "wrap"
+    boundary: str = "clamp"
 
     def __post_init__(self) -> None:
         if self.boundary not in BOUNDARIES:
-            raise ValueError(f"boundary must be one of {BOUNDARIES}, got {self.boundary!r}")
+            raise ValueError(
+                f"boundary must be one of {BOUNDARIES}, got {self.boundary!r}"
+            )
         if min(self.width, self.height, self.dt) <= 0:
             raise ValueError("width, height and dt must be positive")
 
@@ -58,16 +60,31 @@ class WormConfig:
         allow_reverse: Whether negative throttle is honoured. C. elegans
             reverses as part of the pirouette.
         radius: Drawn size only; eating uses ``food.eat_radius``.
+        head_sweep_amplitude: How far the head, which carries the
+            chemosensors, swings to either side of the body's line of travel,
+            in world units. 0 keeps the worm a point that smells where it
+            stands. A point sensor reads only ``cos(bearing)``, so food on the
+            left and food on the right smell the same; a sweeping one adds a
+            term in ``sin(bearing)``, which is what weathervane steering
+            (klinotaxis) is built on.
+        head_sweep_period: Seconds for one full left-right-left sweep. Only
+            read when ``head_sweep_amplitude`` is above 0.
     """
 
     max_speed: float = 2.0
     max_turn_rate: float = 3.0
     allow_reverse: bool = True
     radius: float = 0.25
+    head_sweep_amplitude: float = 0.0
+    head_sweep_period: float = 0.8
 
     def __post_init__(self) -> None:
         if min(self.max_speed, self.max_turn_rate, self.radius) <= 0:
             raise ValueError("max_speed, max_turn_rate and radius must be positive")
+        if self.head_sweep_amplitude < 0:
+            raise ValueError("head_sweep_amplitude must be non-negative (0 disables the sweep)")
+        if self.head_sweep_period <= 0:
+            raise ValueError("head_sweep_period must be positive")
 
 
 @dataclass
@@ -99,7 +116,9 @@ class RandomizationConfig:
 
     def __post_init__(self) -> None:
         self.speed_scale = config_io.validate_range("speed_scale", self.speed_scale)
-        self.turn_rate_scale = config_io.validate_range("turn_rate_scale", self.turn_rate_scale)
+        self.turn_rate_scale = config_io.validate_range(
+            "turn_rate_scale", self.turn_rate_scale
+        )
         self.food_count_scale = config_io.validate_range(
             "food_count_scale", self.food_count_scale
         )
@@ -167,7 +186,9 @@ class FoodConfig:
         if self.eat_radius <= 0 or self.scent_radius <= 0:
             raise ValueError("eat_radius and scent_radius must be positive")
         if self.eat_radius > self.scent_radius:
-            raise ValueError("eat_radius must not exceed scent_radius (nothing to follow)")
+            raise ValueError(
+                "eat_radius must not exceed scent_radius (nothing to follow)"
+            )
 
 
 @dataclass
@@ -281,7 +302,9 @@ class RewardConfig:
 
     def __post_init__(self) -> None:
         if self.death_penalty < 0:
-            raise ValueError("death_penalty is subtracted; give it a positive magnitude")
+            raise ValueError(
+                "death_penalty is subtracted; give it a positive magnitude"
+            )
 
 
 @dataclass
@@ -316,11 +339,22 @@ class ObservationConfig:
             A separate line supplies discriminability while leaving valence to
             be learned, which is also how the animal is wired. Constant 0 when
             ``toxin.count`` is 0.
+        include_toxin_delta: Report the change in toxin concentration since the
+            last step on its own channel, for the same scaling reason as
+            ``include_smell_delta``. Under a head sweep it is also what carries
+            the side the toxin is on, as the change multiplied by
+            ``cos(phase)``; without it the policy has to take that difference
+            from stacked frames. Constant 0 when ``toxin.count`` is 0.
         include_touch: Mechanosensation, reporting how much of the last step's
             commanded motion the world refused. Under ``boundary: clamp`` a wall
             is otherwise invisible: the worm cannot tell it has stopped moving,
             so it cannot learn to turn away while it burns ``move_cost`` pushing
             into stone. Constant 0 under ``boundary: wrap``.
+        include_head_phase: Proprioception of the head sweep, as the sin and
+            cos of its phase. The sweep puts the side of the gradient into the
+            smell as ``cos(phase) * sin(bearing)``, so reading it back needs to
+            know which way the head was swinging. Requires
+            ``worm.head_sweep_amplitude`` above 0.
     """
 
     include_energy: bool = True
@@ -328,6 +362,8 @@ class ObservationConfig:
     include_smell_delta: bool = False
     include_touch: bool = True
     include_toxin: bool = False
+    include_toxin_delta: bool = False
+    include_head_phase: bool = False
 
     def __post_init__(self) -> None:
         if not (self.include_smell_level or self.include_smell_delta):
@@ -395,7 +431,9 @@ class RenderConfig:
         if min(self.worm_body_length, self.worm_wavelength) <= 0:
             raise ValueError("worm_body_length and worm_wavelength must be positive")
         if self.worm_wave_amplitude < 0:
-            raise ValueError("worm_wave_amplitude must be non-negative (0 draws it straight)")
+            raise ValueError(
+                "worm_wave_amplitude must be non-negative (0 draws it straight)"
+            )
 
 
 @dataclass
@@ -425,3 +463,19 @@ class EnvConfig(config_io.ConfigRoot):
     render: RenderConfig = field(default_factory=RenderConfig)
 
     # from_dict / from_yaml / resolve / to_dict / to_yaml come from ConfigRoot.
+
+    def __post_init__(self) -> None:
+        # Checks that span two sections, so neither section can make them alone.
+        sweeping = self.worm.head_sweep_amplitude > 0
+        if sweeping and self.worm.head_sweep_period < 4 * self.world.dt:
+            # At 2 steps per sweep the samples can land on the midline every
+            # step and carry no lateral information at all.
+            raise ValueError(
+                f"head_sweep_period ({self.worm.head_sweep_period}) must cover at least "
+                f"4 steps of world.dt ({self.world.dt}) for the sweep to be sampled"
+            )
+        if self.observation.include_head_phase and not sweeping:
+            raise ValueError(
+                "include_head_phase needs worm.head_sweep_amplitude above 0; "
+                "without a sweep the phase carries no information"
+            )

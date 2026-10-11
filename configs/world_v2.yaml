@@ -29,12 +29,23 @@ worm:
   # food.eat_radius. This is the body's half-width at its thickest, so the
   # drawn worm is 2 * radius across against render.worm_body_length long.
   radius: 0.08
+  # Head sweep: the chemosensors ride on a head that swings sideways while
+  # the worm crawls, as the animal's does. A point sensor only reads
+  # cos(bearing), so food on the left and on the right smell identical; the
+  # sweep adds a cos(phase) * sin(bearing) term to the change in smell, which
+  # is the side information weathervane steering (klinotaxis) needs. Keep the
+  # amplitude well under the scent sigma (scent_radius * gaussian_sigma_scale)
+  # so the head samples a local slope. 0 makes the worm a point again.
+  head_sweep_amplitude: 0.2
+  # Seconds per full left-right-left sweep; the animal's head swing is about
+  # 0.5-1 s. Must span at least 4 steps of world.dt to be sampled at all.
+  head_sweep_period: 0.8
 
 randomization:
   # Multipliers on the nominal values above, redrawn every reset. The worm is
   # never told what it drew, so no policy can bake in one exact calibration.
   # Set enabled: false for fixed dynamics, e.g. when isolating a bug.
-  enabled: true
+  enabled: false 
   speed_scale: [0.75, 1.25]
   turn_rate_scale: [0.75, 1.25]
   # Unlike the actuation draws this one is sensable — a denser world smells
@@ -44,7 +55,7 @@ randomization:
   food_count_scale: [0.5, 1.5]
 
 food:
-  count: 5
+  count: 10
   eat_radius: 1.0         # contact radius; touch a pellet and it is eaten
   scent_radius: 4.0       # sensory radius; must exceed eat_radius to be followable
   scent_peak: 1.0         # concentration at a pellet's exact centre
@@ -76,7 +87,7 @@ toxin:
   # 8 sources at food's own radius sounds balanced and is not: a third of the
   # world is worse than open water and the safe policy is to stop foraging.
   # At 5, avoidance is worth learning while foraging is still the main task.
-  count: 2 
+  count: 4  
   # At full concentration this is 7.5x basal_cost, so sitting on a source burns
   # a full worm in ~35 steps: harsh enough to matter, slow enough that the
   # association is learnable rather than instantly fatal.
@@ -91,7 +102,7 @@ toxin:
 
 metabolism:
   max_energy: 100.0
-  initial_energy: 60.0
+  initial_energy: 40.0
   # THE critical ratio: basal must dominate move, or freezing outlives foraging
   # and training converges there. initial_energy / basal_cost is the freeze
   # baseline, and toxins leave it intact: min_spawn_distance keeps hazards off
@@ -129,10 +140,19 @@ observation:
   # to learn which one is worth approaching. Set false, with count above left
   # alone, for the toxin-blind control run.
   include_toxin: true
+  # Step-to-step change in toxin concentration, on its own channel, for the
+  # same scaling reason as include_smell_delta. Under the head sweep it also
+  # carries which side the toxin is on, so avoidance can steer rather than
+  # only reverse.
+  include_toxin_delta: true
   # Mechanosensation. Under boundary: clamp a wall is otherwise invisible — the
   # worm cannot tell it has stopped moving, so it cannot learn to turn away.
   # Constant 0 under wrap.
   include_touch: true
+  # Proprioception of the head sweep: sin and cos of its phase. Reading the
+  # side of the gradient out of the smell means knowing which way the head was
+  # swinging when it rose. Requires worm.head_sweep_amplitude above 0.
+  include_head_phase: true
 
 render:
   window_size: 700

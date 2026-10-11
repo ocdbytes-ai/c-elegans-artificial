@@ -94,6 +94,7 @@ class WormWorldEnv(gym.Env):
         self.observation_space = self._observation.space
         self.steps = 0
         self._previous_food_smell = 0.0
+        self._previous_toxin_smell = 0.0
 
     @property
     def observation_labels(self) -> list[str]:
@@ -120,7 +121,8 @@ class WormWorldEnv(gym.Env):
         self.steps = 0
         # Seeded with the current reading so the first difference is 0 rather
         # than a jump from whatever the last episode ended on.
-        self._previous_food_smell = float(self.food.scent_at(self.worm.position))
+        self._previous_food_smell = float(self.food.scent_at(self.worm.head_position))
+        self._previous_toxin_smell = float(self.toxin.scent_at(self.worm.head_position))
 
         observation = self._observe()
         if self.render_mode == "human":
@@ -146,7 +148,8 @@ class WormWorldEnv(gym.Env):
         eaten = self.food.consume(self.worm.position, self.np_random)
         self.metabolism.eat(eaten)
         # Dosed after moving, so the cost reflects where the action landed the
-        # worm rather than where it set off from.
+        # worm rather than where it set off from. Dosed at the body, not the
+        # head: the sweep moves the sensor, not the tissue taking the harm.
         self.metabolism.poison(
             float(self.toxin.scent_at(self.worm.position)), self.config.toxin.damage
         )
@@ -193,8 +196,9 @@ class WormWorldEnv(gym.Env):
             self._renderer = None
 
     def _observe(self) -> np.ndarray:
-        """Reads the current observation and remembers this step's scent."""
-        smell = float(self.food.scent_at(self.worm.position))
+        """Reads the current observation and remembers this step's scents."""
+        smell = float(self.food.scent_at(self.worm.head_position))
+        toxin = float(self.toxin.scent_at(self.worm.head_position))
         observation = self._observation(
             Sensors(
                 self.worm,
@@ -203,9 +207,12 @@ class WormWorldEnv(gym.Env):
                 self.metabolism,
                 food_smell=smell,
                 previous_food_smell=self._previous_food_smell,
+                toxin_smell=toxin,
+                previous_toxin_smell=self._previous_toxin_smell,
             )
         )
         self._previous_food_smell = smell
+        self._previous_toxin_smell = toxin
         return observation
 
     def _info(self, eaten: int, moved: float) -> StepInfo:
@@ -234,8 +241,8 @@ class WormWorldEnv(gym.Env):
             "toxin_damage": ledger.toxin_damage,
             "food_eaten": eaten,
             "food_eaten_total": self.food.eaten_total,
-            "food_smell": float(self.food.scent_at(self.worm.position)),
-            "toxin_smell": float(self.toxin.scent_at(self.worm.position)),
+            "food_smell": float(self.food.scent_at(self.worm.head_position)),
+            "toxin_smell": float(self.toxin.scent_at(self.worm.head_position)),
             "nearest_food_distance": food_distance,
             "distance_moved": moved,
             "touch": self.worm.blocked,

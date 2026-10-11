@@ -49,6 +49,10 @@ class Sensors:
         previous_food_smell: The same value one step ago. Equal to
             ``food_smell`` on the first step of an episode, so the difference
             starts at 0.
+        toxin_smell: Toxin concentration at the worm's head this step, passed in
+            for the same reason as ``food_smell``.
+        previous_toxin_smell: The same value one step ago, seeded like
+            ``previous_food_smell``.
     """
 
     worm: Worm
@@ -57,6 +61,8 @@ class Sensors:
     metabolism: Metabolism
     food_smell: float = 0.0
     previous_food_smell: float = 0.0
+    toxin_smell: float = 0.0
+    previous_toxin_smell: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -115,19 +121,24 @@ def build_channels(config: EnvConfig) -> list[Channel]:
             )
         )
 
+    toxin_ceiling = max_possible_toxin(config.toxin)
     if config.observation.include_toxin:
         # A second labelled line rather than a shared or signed channel: summed,
         # food beside a toxin is indistinguishable from strong food; signed, the
         # two cancel and the most dangerous spot reads as open water. Separate
         # channels give the worm the ability to tell them apart while leaving it
         # to learn which one is worth approaching.
-        toxin_ceiling = max_possible_toxin(config.toxin)
+        channels.append(Channel("toxin_smell", 0.0, toxin_ceiling, lambda s: s.toxin_smell))
+
+    if config.observation.include_toxin_delta:
+        # Same reasoning as food_smell_delta: a difference taken from the stack
+        # arrives too quiet for the policy to follow.
         channels.append(
             Channel(
-                "toxin_smell",
-                0.0,
+                "toxin_smell_delta",
+                -toxin_ceiling,
                 toxin_ceiling,
-                lambda s: float(s.toxin.scent_at(s.worm.position)),
+                lambda s: s.toxin_smell - s.previous_toxin_smell,
             )
         )
 
@@ -146,6 +157,18 @@ def build_channels(config: EnvConfig) -> list[Channel]:
     channels.append(
         Channel("heading_cos", -1.0, 1.0, lambda s: s.worm.heading_sin_cos[1])
     )
+
+    if config.observation.include_head_phase:
+        # Appended last so every earlier channel keeps its index. Turning the
+        # sweep's oscillation in the smell back into "food is on the left"
+        # means multiplying the smell's change by cos(phase); with both here in
+        # one frame that is a product of two inputs, no memory needed.
+        channels.append(
+            Channel("head_phase_sin", -1.0, 1.0, lambda s: s.worm.head_phase_sin_cos[0])
+        )
+        channels.append(
+            Channel("head_phase_cos", -1.0, 1.0, lambda s: s.worm.head_phase_sin_cos[1])
+        )
 
     return channels
 

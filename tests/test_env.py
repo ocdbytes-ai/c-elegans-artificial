@@ -193,6 +193,12 @@ def test_partial_config_overrides_only_what_it_names():
         ({"randomization": {"speed_scale": [1.5, 0.5]}}, "speed_scale low must not exceed high"),
         ({"randomization": {"speed_scale": [0.0, 1.0]}}, "speed_scale low must be positive"),
         ({"randomization": {"turn_rate_scale": 1.5}}, "turn_rate_scale must be a"),
+        ({"worm": {"head_sweep_amplitude": -0.1}}, "head_sweep_amplitude must be non-negative"),
+        (
+            {"worm": {"head_sweep_amplitude": 0.2, "head_sweep_period": 0.2}},
+            "must cover at least 4 steps",
+        ),
+        ({"observation": {"include_head_phase": True}}, "include_head_phase needs"),
     ],
 )
 def test_bad_config_is_rejected(overrides, message):
@@ -498,3 +504,103 @@ def test_minimum_image_displacement_takes_the_short_way():
 
     delta = geometry.displacement(np.array([19.0, 10.0]), np.array([1.0, 10.0]), size, "clamp")
     np.testing.assert_allclose(delta, [-18.0, 0.0])
+
+
+# -- head sweep ------------------------------------------------------------
+
+SWEEP = {"head_sweep_amplitude": 0.2, "head_sweep_period": 0.8}
+
+
+def _placed_worm(worm: dict, food_at: list[float] | None = None) -> WormWorldEnv:
+    """A worm at the arena centre heading east, with at most one pellet."""
+    env = WormWorldEnv(
+        config={"worm": worm, "randomization": {"enabled": False}, "toxin": {"count": 0}}
+    )
+    env.reset(seed=0)
+    env.worm.position = np.array([10.0, 10.0])
+    env.worm.heading = 0.0
+    env.food.positions = np.array([food_at]) if food_at else np.zeros((0, 2))
+    return env
+
+
+def test_head_swings_to_the_left_at_a_quarter_phase():
+    env = _placed_worm(SWEEP)
+    env.worm.phase = np.pi / 2
+    np.testing.assert_allclose(env.worm.head_position - env.worm.position, [0.0, 0.2])
+    env.worm.phase = -np.pi / 2
+    np.testing.assert_allclose(env.worm.head_position - env.worm.position, [0.0, -0.2])
+
+
+def test_sweepless_head_is_the_body():
+    env = _placed_worm({"head_sweep_amplitude": 0.0})
+    for _ in range(10):
+        env.step(np.array([0.3, 1.0], dtype=np.float32))
+        np.testing.assert_array_equal(env.worm.head_position, env.worm.position)
+
+
+def test_head_phase_channels_are_appended_last():
+    env = WormWorldEnv(
+        config={"worm": SWEEP, "observation": {"include_head_phase": True}}
+    )
+    assert env.observation_labels == FULL_OBSERVATION + ["head_phase_sin", "head_phase_cos"]
+
+
+def _side_signal(worm: dict, side: float) -> float:
+    """Mean of (change in smell) * cos(phase) over two sweeps past a pellet.
+
+    The worm drives straight past a pellet 1.5 units to one side, symmetric
+    about it, so the forward part of the change averages out and only the
+    sweep's lateral part can survive. See
+    notes/klinokinesis-and-klinotaxis.md.
+    """
+    env = _placed_worm(worm, food_at=[10.0, 10.0 + side * 1.5])
+    env.worm.position = np.array([9.2, 10.0])
+    env.worm.phase = 0.0
+    previous = float(env.food.scent_at(env.worm.head_position))
+    products = []
+    for _ in range(16):  # two full sweeps at 8 steps each
+        _, _, _, _, info = env.step(np.array([0.0, 0.5], dtype=np.float32))
+        products.append((info["food_smell"] - previous) * np.cos(env.worm.phase))
+        previous = info["food_smell"]
+    return float(np.mean(products))
+
+
+def test_sweep_reveals_which_side_the_food_is_on():
+    left, right = _side_signal(SWEEP, +1.0), _side_signal(SWEEP, -1.0)
+    assert left > 0 > right
+    # left = L + F and right = -L + F: the lateral part L flips with the side,
+    # the leftover forward part F does not. F must be small next to L.
+    lateral, forward = (left - right) / 2, (left + right) / 2
+    assert abs(forward) < 0.1 * lateral
+
+
+def test_point_worm_cannot_tell_left_from_right():
+    point = {"head_sweep_amplitude": 0.0}
+    assert _side_signal(point, +1.0) == _side_signal(point, -1.0)
+
+
+def test_toxin_delta_reports_the_change_since_last_step():
+    env = WormWorldEnv(
+        config={
+            "toxin": {"count": 1},
+            "randomization": {"enabled": False},
+            "observation": {"include_toxin": True, "include_toxin_delta": True},
+        }
+    )
+    labels = env.observation_labels
+    assert labels.index("toxin_smell_delta") == labels.index("toxin_smell") + 1
+
+    observation, _ = env.reset(seed=0)
+    delta = labels.index("toxin_smell_delta")
+    assert observation[delta] == 0.0, "the first difference must start at 0"
+
+    # Head straight at the source so the concentration is certain to change.
+    env.toxin.positions = np.array([[12.0, 10.0]])
+    env.worm.position = np.array([10.0, 10.0])
+    env.worm.heading = 0.0
+    before = float(env.toxin.scent_at(env.worm.head_position))
+    env._previous_toxin_smell = before
+    observation, *_ = env.step(np.array([0.0, 1.0], dtype=np.float32))
+    after = float(env.toxin.scent_at(env.worm.head_position))
+    assert after > before
+    assert np.isclose(observation[delta], after - before, atol=1e-6)

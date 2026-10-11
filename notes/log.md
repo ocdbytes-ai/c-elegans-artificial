@@ -74,3 +74,36 @@ It has been several weeks since I came back to this project because of some othe
 
 I have a whole document at : [Klinokinesis and Klinotaxis Analysis](./klinokinesis-and-klinotaxis.md) 
 One can get through the document and see what is actually happening when worm is trained. 
+
+## Stage 4 
+
+Back at it after 2 weeks so I wanted to see if I give worm a knowledge of theta $\theta$ an angle where worm can move the head in order to see the heading. Klinokinesis is not doing is as of now the worm seems confused about where to head if the concentration change is minute which is in almost all random configurations. 
+
+Now I have asked claude to add a heading angle so that worm can differentiate a direction using another parameter. I checked and it doesn't deviate from the actual biology. 
+In regards to how I came to know about that current klinokinesis is not working is by using a mirror test in which I basically create a mirror world of the configurated run and then simulate on both worlds. That's where I wanted to add a sweep sensor for the worm.
+
+Some numerical analysis : 
+
+
+```
+ phase  head  |  FOOD LEFT            |  FOOD RIGHT           | cos(phase) |  Δ·cos  L    Δ·cos  R
+              |  smell    Δ smell     |  smell    Δ smell     |            |
+  +45   left  |  0.6245   +0.061      |  0.5029   −0.060      |   +0.71    |  +0.043      −0.043
+  +90   LEFT  |  0.6498   +0.025      |  0.4784   −0.025      |    0.00    |   0.000       0.000
+ +135   left  |  0.6245   −0.025      |  0.5029   +0.025      |   −0.71    |  +0.018      −0.017
+ ±180   mid   |  0.5633   −0.061      |  0.5633   +0.060      |   −1.00    |  +0.061      −0.060
+ −135   right |  0.5029   −0.060      |  0.6245   +0.061      |   −0.71    |  +0.043      −0.043
+  −90   RIGHT |  0.4784   −0.025      |  0.6498   +0.025      |    0.00    |   0.000       0.000
+  −45   right |  0.5029   +0.025      |  0.6245   −0.025      |   +0.71    |  +0.017      −0.018
+    0   mid   |  0.5633   +0.060      |  0.5633   −0.061      |   +1.00    |  +0.060      −0.061
+```
+
+
+Result should be  : 
+
+Δ smell, averaged over a sweep           --> up or down the gradient   --> klinokinesis
+Δ smell × cos(phase), averaged           --> which side                --> klinotaxis
+
+The run has actually improved and worm has learned to scavange properly instead of just randomly heading with some learned behaviour. It's awesome !! 
+
+
