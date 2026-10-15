@@ -19,7 +19,7 @@ A point worm in a 20 × 20 arena eats pellets to keep its energy up and avoids t
 |---|---|---|
 | freeze | 199 | 0 |
 | straight | 230 | 0.6 |
-| **trained** | **2031** | **13.1** |
+| **trained** | **2031** | **23** |
 | greedy (knows pellet positions) | 4000 (cap) | 219 |
 
 **Emerged behaviour:** klinokinesis for food and toxins, and klinotaxis after the head sweep was added.

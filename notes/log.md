@@ -2,8 +2,6 @@
 
 ## Stage 1
 
-![worm](../assets/worm.png)
-
 ### Signals
 
 Stage 1 is defined as training the worm for finding food in order to survive. Current inputs to the policy are : 
