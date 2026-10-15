@@ -79,13 +79,12 @@ def make_scent_profile(config: FoodConfig | ToxinConfig) -> ScentProfile:
     Raises:
         ValueError: If ``config.scent_profile`` names an unknown profile.
     """
-    radius, peak = config.scent_radius, config.scent_peak
-
     if config.scent_profile == "gaussian":
-        scale = config.gaussian_sigma_scale
-        return lambda d: gaussian(d, radius, peak, scale)
+        return lambda d: gaussian(
+            d, config.scent_radius, config.scent_peak, config.gaussian_sigma_scale
+        )
     if config.scent_profile == "linear":
-        return lambda d: linear(d, radius, peak)
+        return lambda d: linear(d, config.scent_radius, config.scent_peak)
     if config.scent_profile == "inverse_square":
-        return lambda d: inverse_square(d, radius, peak)
+        return lambda d: inverse_square(d, config.scent_radius, config.scent_peak)
     raise ValueError(f"unknown scent profile {config.scent_profile!r}")

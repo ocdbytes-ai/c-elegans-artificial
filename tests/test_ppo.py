@@ -162,12 +162,19 @@ def test_smell_ceiling_is_sized_for_the_richest_stage(tmp_path):
 
 def test_curriculum_reaches_the_live_env(tmp_path):
     trainer = _curriculum_trainer(tmp_path)
+    food = trainer.env.unwrapped.food
+    food.positions = np.array([[0.0, 0.0]])
+    probe = np.array([3.0, 0.0])
+    forgiving_scent = float(food.scent_at(probe))
+
     trainer.curriculum.apply(trainer.env_config, epoch=10, total_epochs=10)
+    assert float(food.scent_at(probe)) < forgiving_scent
+
     trainer.env.reset(seed=0)
     low, high = trainer.env_config.randomization.food_count_bounds(
         trainer.target_env_config.food.count
     )
-    assert low <= trainer.env.unwrapped.food.count <= high
+    assert low <= food.count <= high
     trainer.env.close()
 
 
@@ -278,21 +285,22 @@ def test_actor_critic_shapes():
     env.close()
 
 
-def test_log_std_floor_holds_through_training(trainer):
-    """Exploration must not be able to collapse, whatever the loss prefers."""
+def test_log_std_floor_holds_through_training(trainer, monkeypatch):
+    """Every optimiser step must leave exploration at or above its floor."""
     floor = trainer.config.network.log_std_min
     assert floor is not None
+    original_step = trainer.pi_optimizer.step
 
-    # Drive it hard below the floor, as 470 epochs of surrogate pressure would.
-    with torch.no_grad():
-        trainer.ac.pi.log_std.fill_(floor - 3.0)
-    trainer.ac.pi.clamp_log_std()
-    assert torch.all(trainer.ac.pi.log_std >= floor)
+    def push_below_floor():
+        result = original_step()
+        with torch.no_grad():
+            trainer.ac.pi.log_std.fill_(floor - 3.0)
+        return result
 
-    trainer.epoch = 1
+    monkeypatch.setattr(trainer.pi_optimizer, "step", push_below_floor)
     trainer.collect()
     trainer.update()
-    assert torch.all(trainer.ac.pi.log_std >= floor), "an update pushed sigma under the floor"
+    assert torch.all(trainer.ac.pi.log_std >= floor)
 
 
 def test_floor_can_be_disabled():
@@ -304,11 +312,6 @@ def test_floor_can_be_disabled():
     ac.pi.clamp_log_std()
     assert torch.all(ac.pi.log_std == -9.0)
     env.close()
-
-
-def test_floor_above_the_initial_std_is_rejected():
-    with pytest.raises(ValueError, match="log_std_min .* is above log_std_init"):
-        PPOConfig.from_dict({"network": {"log_std_init": -2.0, "log_std_min": -1.2}})
 
 
 def test_untrained_policy_starts_swimming_forward(tmp_path):
@@ -385,7 +388,8 @@ def test_deterministic_act_is_the_distribution_mean():
     ac = ActorCritic(env.observation_space, env.action_space, PPOConfig().network)
     obs = torch.zeros(env.observation_space.shape, dtype=torch.float32)
     np.testing.assert_allclose(
-        ac.act(obs, deterministic=True), ac.act(obs, deterministic=True)
+        ac.act(obs, deterministic=True),
+        ac.pi.distribution(obs).mean.detach().numpy(),
     )
     env.close()
 

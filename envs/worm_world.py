@@ -55,6 +55,7 @@ class WormWorldEnv(gym.Env):
     # Class-level deliberately: gym.make() reads this off the class before any
     # instance exists, to decide whether to auto-apply HumanRendering. __init__
     # replaces it per instance so render_fps reflects the actual config.
+    # RGB array mode exists to feed the data to a CNN or analyse the frames.
     metadata: ClassVar[dict[str, Any]] = {
         "render_modes": ["human", "rgb_array"],
         "render_fps": 30,
@@ -84,7 +85,9 @@ class WormWorldEnv(gym.Env):
         self.metadata = {**self.metadata, "render_fps": self.config.render.fps}
 
         self.worm = Worm(self.config.worm, self.config.world, self.config.randomization)
-        self.food = FoodField(self.config.food, self.config.world, self.config.randomization)
+        self.food = FoodField(
+            self.config.food, self.config.world, self.config.randomization
+        )
         self.toxin = ToxinField(self.config.toxin, self.config.world)
         self.metabolism = Metabolism(self.config.metabolism)
         self._observation = ObservationBuilder(self.config)
@@ -129,7 +132,9 @@ class WormWorldEnv(gym.Env):
             self.render()
         return observation, self._info(eaten=0, moved=0.0)
 
-    def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, StepInfo]:
+    def step(
+        self, action: np.ndarray
+    ) -> tuple[np.ndarray, float, bool, bool, StepInfo]:
         """Advances the simulation by one step.
 
         Args:
@@ -163,7 +168,13 @@ class WormWorldEnv(gym.Env):
         observation = self._observe()
         if self.render_mode == "human":
             self.render()
-        return observation, float(reward), terminated, False, self._info(eaten, move.distance)
+        return (
+            observation,
+            float(reward),
+            terminated,
+            False,
+            self._info(eaten, move.distance),
+        )
 
     def render(self) -> np.ndarray | None:
         """Draws the current frame.
@@ -178,7 +189,9 @@ class WormWorldEnv(gym.Env):
             from .rendering import PygameRenderer  # imported lazily: pygame is optional
 
             self._renderer = PygameRenderer(self.config, self.render_mode)
-        return self._renderer.draw(self.worm, self.food, self.toxin)
+        return self._renderer.draw(
+            self.worm, self.food, self.toxin, self.metabolism, self.steps
+        )
 
     @property
     def window_closed(self) -> bool:

@@ -1,8 +1,7 @@
-"""Strictly monochrome pygame renderer.
+"""Retro cyan phosphor renderer for the pygame world.
 
-Everything is black and white, so brightness carries all the meaning. Pellets
-are solid white discs and the worm is a white body outlined in black, which
-keeps it legible whether the background is empty or a bright patch of scent.
+The display uses a dark dotted grid, glowing cyan organisms and hazards, and a
+compact pixel-style HUD inspired by old monochrome laboratory terminals.
 
 The worm's body is decoration, not simulation. The physics is a single point
 (:mod:`envs.worm`); the renderer keeps a trail of where that point has been and
@@ -29,14 +28,19 @@ import pygame
 
 from . import geometry
 from .config import EnvConfig
+from .metabolism import Metabolism
 from .scent import make_scent_profile
 from .sources import FoodField, ScentField
 from .worm import Worm
 
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-CONTOUR_NEAR = 225  # grey of the innermost (strongest) scent ring
-CONTOUR_FAR = 55  # grey of the outermost (faintest) scent ring
+BACKGROUND = (2, 8, 11)
+GRID = (5, 22, 27)
+CYAN = (40, 220, 255)
+CYAN_DIM = (12, 82, 100)
+CYAN_FAINT = (7, 42, 51)
+HUD_HEIGHT = 58
+CONTOUR_NEAR = 185
+CONTOUR_FAR = 45
 
 
 class PygameRenderer:
@@ -64,17 +68,25 @@ class PygameRenderer:
         self.render_mode = render_mode
 
         world = config.world
-        self.scale = config.render.window_size / max(world.width, world.height)
-        self.size_px = (round(world.width * self.scale), round(world.height * self.scale))
+        window = config.render.window_size
+        self.scale = min(window / world.width, (window - HUD_HEIGHT) / world.height)
+        play_width = world.width * self.scale
+        play_height = world.height * self.scale
+        self.play_origin = ((window - play_width) / 2.0, HUD_HEIGHT)
+        self.size_px = (window, window)
 
         pygame.init()
+        pygame.font.init()
         self.surface = pygame.Surface(self.size_px)
+        self._background = self._build_background()
+        self._glow = pygame.Surface(self.size_px, pygame.SRCALPHA)
+        self._font = pygame.font.Font(None, max(20, round(window * 0.045)))
         self.window: pygame.Surface | None = None
         self.clock: pygame.time.Clock | None = None
         self.closed = False
         if render_mode == "human":
             pygame.display.init()
-            pygame.display.set_caption("AI Worm — world v1")
+            pygame.display.set_caption("AI Worm")
             self.window = pygame.display.set_mode(self.size_px)
             self.clock = pygame.time.Clock()
 
@@ -87,7 +99,14 @@ class PygameRenderer:
         self._last_head: np.ndarray | None = None
         self._phase = 0.0
 
-    def draw(self, worm: Worm, food: FoodField, toxin: ScentField) -> np.ndarray | None:
+    def draw(
+        self,
+        worm: Worm,
+        food: FoodField,
+        toxin: ScentField,
+        metabolism: Metabolism,
+        steps: int,
+    ) -> np.ndarray | None:
         """Renders one frame.
 
         The counters live in the terminal now (:mod:`ppo.tui`), so nothing here
@@ -96,7 +115,9 @@ class PygameRenderer:
         Args:
             worm: The body to draw.
             food: Pellets and the scent field.
-            toxin: Hazards, drawn as rings rather than discs.
+            toxin: Hazards, drawn as dotted fields.
+            metabolism: Current energy for the HUD.
+            steps: Current episode step for the HUD.
 
         Returns:
             An RGB array under ``"rgb_array"``, otherwise None, including once
@@ -105,10 +126,14 @@ class PygameRenderer:
         if self.closed:
             return None
 
+        self.surface.blit(self._background, (0, 0))
+        self._glow.fill((0, 0, 0, 0))
         self._draw_scent_field(food)
         self._draw_food(food)
         self._draw_toxins(toxin)
         self._draw_worm(worm)
+        self.surface.blit(self._glow, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
+        self._draw_hud(metabolism, steps)
 
         if self.render_mode == "human":
             assert self.window is not None and self.clock is not None
@@ -137,6 +162,47 @@ class PygameRenderer:
             self.window = None
         pygame.quit()
 
+    def _build_background(self) -> pygame.Surface:
+        """Builds the static dotted screen and playfield divider."""
+        background = pygame.Surface(self.size_px)
+        background.fill(BACKGROUND)
+        spacing = max(4, round(self.config.render.window_size / 140))
+        for y in range(2, self.size_px[1], spacing):
+            for x in range(2, self.size_px[0], spacing):
+                background.set_at((x, y), GRID)
+        for x in range(8, self.size_px[0] - 8, spacing * 2):
+            pygame.draw.circle(background, CYAN_DIM, (x, HUD_HEIGHT - 3), 1)
+        return background
+
+    def _glow_circle(self, centre: tuple[int, int], radius: int, colour=CYAN) -> None:
+        """Draws one crisp phosphor dot with a soft halo."""
+        pygame.draw.circle(self._glow, (*CYAN_DIM, 28), centre, radius + 5)
+        pygame.draw.circle(self._glow, (*CYAN, 55), centre, radius + 2)
+        pygame.draw.circle(self.surface, colour, centre, radius)
+
+    def _draw_hud(self, metabolism: Metabolism, steps: int) -> None:
+        """Draws the energy bar and elapsed-step counter."""
+        energy = metabolism.energy_fraction
+        margin = 12
+        label = self._font.render("ENERGY", False, CYAN)
+        self.surface.blit(label, (margin, 10))
+
+        bar_x = margin + label.get_width() + 10
+        bar_y, bar_h = 13, max(14, label.get_height() - 7)
+        bar_w = max(80, round(self.size_px[0] * 0.23))
+        pygame.draw.rect(self.surface, CYAN_DIM, (bar_x, bar_y, bar_w, bar_h), width=2)
+        inset = 4
+        fill_w = round((bar_w - 2 * inset) * energy)
+        if fill_w:
+            pygame.draw.rect(
+                self.surface,
+                CYAN,
+                (bar_x + inset, bar_y + inset, fill_w, bar_h - 2 * inset),
+            )
+
+        timer = self._font.render(f"T {steps:05d}", False, CYAN)
+        self.surface.blit(timer, (self.size_px[0] - timer.get_width() - margin, 10))
+
     def to_screen(self, position: np.ndarray) -> tuple[int, int]:
         """Converts a world position to pixel coordinates.
 
@@ -147,7 +213,11 @@ class PygameRenderer:
             Pixel coordinates, y down from the top-left.
         """
         x, y = np.asarray(position, dtype=np.float64)
-        return (round(x * self.scale), round(self.size_px[1] - y * self.scale))
+        left, top = self.play_origin
+        return (
+            round(left + x * self.scale),
+            round(top + (self.config.world.height - y) * self.scale),
+        )
 
     def _to_screen_batch(self, points: np.ndarray) -> np.ndarray:
         """Vectorised :meth:`to_screen`.
@@ -158,9 +228,10 @@ class PygameRenderer:
         Returns:
             Integer pixel coordinates of shape ``(N, 2)``.
         """
+        left, top = self.play_origin
         screen = np.empty_like(points)
-        screen[:, 0] = points[:, 0] * self.scale
-        screen[:, 1] = self.size_px[1] - points[:, 1] * self.scale
+        screen[:, 0] = left + points[:, 0] * self.scale
+        screen[:, 1] = top + (self.config.world.height - points[:, 1]) * self.scale
         return np.rint(screen).astype(np.int32)
 
     def _build_contours(self) -> list[tuple[np.ndarray, tuple[int, int, int], int]]:
@@ -201,9 +272,10 @@ class PygameRenderer:
             offsets = np.stack([np.cos(angles), np.sin(angles)], axis=-1) * radius
 
             fade = index / max(render.scent_contours - 1, 1)
-            grey = round(CONTOUR_NEAR + (CONTOUR_FAR - CONTOUR_NEAR) * fade)
+            intensity = round(CONTOUR_NEAR + (CONTOUR_FAR - CONTOUR_NEAR) * fade)
+            colour = (round(intensity * 0.18), round(intensity * 0.82), intensity)
             dot_px = 2 if fade < 0.5 else 1
-            contours.append((offsets, (grey, grey, grey), dot_px))
+            contours.append((offsets, colour, dot_px))
         return contours
 
     def _draw_scent_field(self, food: FoodField) -> None:
@@ -212,7 +284,6 @@ class PygameRenderer:
         Args:
             food: The pellet field.
         """
-        self.surface.fill(BLACK)
         render = self.config.render
         if not (render.show_scent_field or render.debug):
             return
@@ -246,15 +317,10 @@ class PygameRenderer:
         scale = 1.0 if render.debug else render.food_dot_scale
         dot_px = max(2, round(food_config.eat_radius * scale * self.scale))
         for position in food.positions:
-            pygame.draw.circle(self.surface, WHITE, self.to_screen(position), dot_px)
+            self._glow_circle(self.to_screen(position), dot_px)
 
     def _draw_toxins(self, toxin: ScentField) -> None:
-        """Draws each toxin source as a hollow ring.
-
-        With no colour available, shape has to carry the distinction: food is
-        solid, a hazard is an outline. The ring is drawn at the radius where the
-        dose costs as much as existing does, so what it encloses is the region
-        that is genuinely worse than open water rather than an arbitrary mark.
+        """Draws each harmful region as a dotted phosphor field.
 
         Args:
             toxin: The hazard field.
@@ -275,12 +341,27 @@ class PygameRenderer:
         )
 
         radius_px = max(4, round(radius * self.scale))
+        spacing = max(10, round(self.scale * 0.4))
+        rings = max(3, round(radius_px / spacing))
         for position in toxin.positions:
             centre = self.to_screen(position)
-            pygame.draw.circle(self.surface, WHITE, centre, radius_px, width=2)
-            # A dot at the source itself, so a ring is never mistaken for empty
-            # space with a boundary round it.
-            pygame.draw.circle(self.surface, WHITE, centre, 2)
+            for ring in range(1, rings + 1):
+                ring_radius = radius_px * ring / rings
+                count = max(8, round(2.0 * np.pi * ring_radius / spacing))
+                intensity = 0.75 - 0.4 * ring / rings
+                colour = (
+                    round(CYAN[0] * intensity),
+                    round(CYAN[1] * intensity),
+                    round(CYAN[2] * intensity),
+                )
+                # Offset alternating rings so dots form circles, not spokes.
+                offset = (ring % 2) * np.pi / count
+                for angle in np.linspace(0.0, 2.0 * np.pi, count, endpoint=False) + offset:
+                    point = (
+                        round(centre[0] + ring_radius * np.cos(angle)),
+                        round(centre[1] + ring_radius * np.sin(angle)),
+                    )
+                    pygame.draw.circle(self.surface, colour, point, 1)
 
     def _track_head(self, worm: Worm) -> None:
         """Extends the trail by this frame's motion and advances the wave phase.
@@ -411,28 +492,19 @@ class PygameRenderer:
         half_width = self.config.worm.radius * np.minimum(nose, tail)
         radii = np.maximum(1, np.rint(half_width * self.scale).astype(int))
 
-        # The outline scales with the body, or a thin worm would be mostly
-        # outline. It only earns its keep against the debug contours; over bare
-        # black it costs nothing.
         outline_px = max(1, min(2, round(self.config.worm.radius * self.scale * 0.25)))
 
         world = self.config.world
         drawn = geometry.apply_boundary(body, world.size, world.boundary)
         screen = self._to_screen_batch(drawn)
-        for colour, pad in ((BLACK, outline_px), (WHITE, 0)):
-            for (x, y), radius in zip(screen, radii, strict=True):
-                pygame.draw.circle(self.surface, colour, (int(x), int(y)), int(radius) + pad)
-
-        # A dark eye just behind the nose. Taper alone leaves the two ends
-        # ambiguous at a glance, and a white whisker would read as a tail tip;
-        # black on the widest part of the body cannot be mistaken for either.
-        eye = body[min(round(0.18 * samples), samples - 1)]
-        eye_px = max(1, round(self.config.worm.radius * 0.32 * self.scale))
-        pygame.draw.circle(self.surface, BLACK, self.to_screen(eye), eye_px)
+        for (x, y), radius in zip(screen, radii, strict=True):
+            centre = (int(x), int(y))
+            pygame.draw.circle(self.surface, BACKGROUND, centre, int(radius) + outline_px)
+            self._glow_circle(centre, int(radius))
 
         if render.debug:
             # The body is decoration; this ring is the point the physics
             # integrates, which is what eats, and the dot is where it smells.
             # The two coincide unless the head sweeps.
-            pygame.draw.circle(self.surface, WHITE, self.to_screen(worm.position), 5, width=1)
-            pygame.draw.circle(self.surface, WHITE, self.to_screen(worm.head_position), 2)
+            pygame.draw.circle(self.surface, CYAN, self.to_screen(worm.position), 5, width=1)
+            pygame.draw.circle(self.surface, CYAN, self.to_screen(worm.head_position), 2)

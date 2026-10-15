@@ -414,7 +414,7 @@ class RenderConfig:
     show_scent_field: bool = False
     scent_contours: int = 5
     contour_dot_spacing: float = 12.0
-    food_dot_scale: float = 0.3
+    food_dot_scale: float = 0.12
     worm_body_length: float = 2.5
     worm_wave_amplitude: float = 0.35
     worm_wavelength: float = 1.6

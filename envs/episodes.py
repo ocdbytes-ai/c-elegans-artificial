@@ -157,7 +157,9 @@ class EpochStats:
             "lifespan_max": float(lengths.max()),
             "return_mean": float(np.mean([e.ret for e in self.episodes])),
             "eaten_mean": float(np.mean([e.eaten for e in self.episodes])),
-            "mean_abs_action": float(np.mean([e.mean_abs_action for e in self.episodes])),
+            "mean_abs_action": float(
+                np.mean([e.mean_abs_action for e in self.episodes])
+            ),
             "energy_in": float(np.mean([e.energy_in for e in self.episodes])),
             "energy_out": float(energy_out.mean()),
             "distance_per_energy": float(distance.sum() / max(energy_out.sum(), 1e-9)),
@@ -181,6 +183,9 @@ _SUMMARY_KEYS = (
 )
 
 
+# Syntax : This is a trait like definition in rust for a Policy trait
+# and a function definition where it takes an array and then returns
+# an array
 class Policy(Protocol):
     """Anything that turns an observation into an action."""
 

@@ -13,9 +13,9 @@ Two things it makes visible that a rendered worm cannot:
 - **Saturation.** A tanh layer sitting at ±1 has no gradient and is passing a
   constant, so a policy that looks busy can be mostly frozen.
 
-Everything is greyscale, matching the renderer: intensity carries magnitude, so
-it reads the same on any terminal theme and in a screenshot. Frames are written
-with a cursor-home rather than a clear, which avoids flicker.
+Activation intensity stays greyscale while colour distinguishes status, trends,
+and controls. Frames are written with a cursor-home rather than a clear, which
+avoids flicker.
 """
 
 from __future__ import annotations
@@ -42,6 +42,11 @@ SHOW_CURSOR = "\x1b[?25h"
 RESET = "\x1b[0m"
 DIM = "\x1b[2m"
 BOLD = "\x1b[1m"
+BLUE = "\x1b[38;5;75m"
+GREEN = "\x1b[38;5;42m"
+YELLOW = "\x1b[38;5;220m"
+RED = "\x1b[38;5;203m"
+ORANGE = "\x1b[38;5;208m"
 
 
 def grey(level: float) -> str:
@@ -102,8 +107,10 @@ def meter(fraction: float, width: int) -> str:
     Returns:
         A coloured bar.
     """
-    filled = round(float(np.clip(fraction, 0.0, 1.0)) * width)
-    return f"{BOLD}{BAR_FULL * filled}{RESET}{DIM}{BAR_EMPTY * (width - filled)}{RESET}"
+    fraction = float(np.clip(fraction, 0.0, 1.0))
+    filled = round(fraction * width)
+    colour = GREEN if fraction > 0.5 else YELLOW if fraction > 0.25 else RED
+    return f"{colour}{BOLD}{BAR_FULL * filled}{RESET}{DIM}{BAR_EMPTY * (width - filled)}{RESET}"
 
 
 def dial(value: float, width: int) -> str:
@@ -117,12 +124,14 @@ def dial(value: float, width: int) -> str:
         A coloured axis with the marker in place.
     """
     centre = width // 2
-    position = centre + round(float(np.clip(value, -1.0, 1.0)) * centre)
+    value = float(np.clip(value, -1.0, 1.0))
+    position = centre + round(value * centre)
+    marker_colour = BLUE if value >= 0.0 else ORANGE
     low, high = min(centre, position), max(centre, position)
     cells = []
     for index in range(width + 1):
         if index == position:
-            cells.append(f"{BOLD}●{RESET}")
+            cells.append(f"{marker_colour}{BOLD}●{RESET}")
         elif index == centre:
             cells.append(f"{DIM}│{RESET}")
         elif low <= index <= high:
@@ -197,7 +206,7 @@ class ActorTUI:
 
     def _rule(self, title: str) -> str:
         """A titled horizontal rule."""
-        return f"{DIM}── {RESET}{title}{DIM} {'─' * max(0, self.width - len(title) - 5)}{RESET}"
+        return f"{DIM}── {RESET}{BLUE}{title}{RESET}{DIM} {'─' * max(0, self.width - len(title) - 5)}{RESET}"
 
     def _senses(self, obs: np.ndarray) -> list[str]:
         """Renders each channel's recent history as a sparkline."""
@@ -208,9 +217,15 @@ class ActorTUI:
             # frame f sits at f * per_frame + c.
             series = np.array([obs[f * per_frame + channel] for f in range(self.frames)])
             delta = float(series[-1] - series[0])
-            arrow = "▲" if delta > FLAT else "▼" if delta < -FLAT else " "
+            arrow = (
+                f"{GREEN}▲{RESET}"
+                if delta > FLAT
+                else f"{RED}▼{RESET}"
+                if delta < -FLAT
+                else " "
+            )
             lines.append(
-                f"  {name:<12}{sparkline(series)}  {series[-1]:+6.2f}  "
+                f"  {BLUE}{name:<12}{RESET}{sparkline(series)}  {series[-1]:+6.2f}  "
                 f"{arrow}{DIM}{delta:+6.3f}{RESET}"
             )
         return lines
@@ -248,10 +263,11 @@ class ActorTUI:
         counters = (
             f"  {DIM}energy{RESET}  {meter(current / maximum, 28)}  "
             f"{current:5.1f}/{maximum:.0f}    "
-            f"{DIM}eaten{RESET} {BOLD}{eaten:<4}{RESET} {DIM}step{RESET} {BOLD}{steps}{RESET}"
+            f"{DIM}eaten{RESET} {GREEN}{BOLD}{eaten:<4}{RESET} "
+            f"{DIM}step{RESET} {BLUE}{BOLD}{steps}{RESET}"
         )
         lines = [
-            f"{BOLD}ACTOR{RESET}{DIM} · the network choosing every move{RESET}",
+            f"{BLUE}{BOLD}ACTOR{RESET}{DIM} · the network choosing every move{RESET}",
             "",
             counters,
             "",
@@ -268,9 +284,10 @@ class ActorTUI:
             # The env clips to [-1, 1], so a larger mean is effort with nowhere
             # to go: worth seeing, since it means the policy is at its bound.
             clipped = f"{DIM} clipped{RESET}" if abs(float(value)) > 1.0 else ""
+            colour = BLUE if float(value) >= 0.0 else ORANGE
             lines.append(
-                f"  {name:<10}{dial(float(value), 28)}  "
-                f"{BOLD}{float(value):+6.2f}{RESET}{clipped}"
+                f"  {colour}{name:<10}{RESET}{dial(float(value), 28)}  "
+                f"{colour}{BOLD}{float(value):+6.2f}{RESET}{clipped}"
             )
         return HOME + "\n".join(line + "\x1b[K" for line in lines) + "\n" + CLEAR_BELOW
 

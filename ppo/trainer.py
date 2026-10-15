@@ -288,6 +288,9 @@ class PPOTrainer:
         for iteration in range(optim.policy_iters):
             self.pi_optimizer.zero_grad()
             loss, diagnostics = self._policy_loss(data)
+            # Stop further updates on this rollout
+            # and next epoch will collect new experience
+            # with updated policy
             if diagnostics["kl"] > 1.5 * optim.target_kl:
                 # The surrogate is a local approximation: from the TRPO bound
                 # (Schulman et al. 2015), true improvement equals the surrogate

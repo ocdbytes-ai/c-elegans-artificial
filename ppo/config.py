@@ -1,9 +1,7 @@
-"""PPO hyperparameters.
+"""PPO configuration and default values.
 
-Same contract as the env config: dataclasses are the schema and the defaults,
-``configs/ppo.yaml`` is the tuning surface, and a partial YAML overrides only
-what it names. Defaults follow OpenAI Spinning Up's PPO so that runs here stay
-comparable to that reference — the deliberate departures are called out below.
+``configs/ppo.yaml`` can override any setting. Defaults follow OpenAI Spinning
+Up's PPO implementation unless noted otherwise.
 """
 
 from __future__ import annotations
@@ -29,25 +27,22 @@ class NetworkConfig:
         log_std_init: Starting log standard deviation. The default gives sigma
             ~0.61.
         log_std_min: Lowest log standard deviation allowed, or None to disable.
-            Sampling is the only exploration PPO has, and the surrogate loss
-            always prefers a narrower one: an unfloored run fell from sigma
-            0.607 to [0.269, 0.191]. Evaluation uses the mean, so a floor costs
-            nothing there.
+            Sampling is the only exploration PPO has and our network calculates the
+            [turn, throttle] and then the separate learned vector of log_std values
+            is defined so in order to keep exploration alive we clamp the values to
+            a min so that the gaussian distribution of actions sampled remains
+            "creative" and not deterministic too soon while training for large
+            number of epochs.
         mean_bias_init: Initial bias per action dimension, here
             ``[turn, throttle]``, or None to leave the network's own init alone.
-            A zero-mean throttle cancels forward against backward and leaves an
-            untrained worm diffusing rather than travelling: 1.24 units of net
-            displacement over a whole life, 0 of 40 episodes eating. Biasing it
-            to 0.5 gives 9.56 units and cv 0.58. 0.5 rather than 1.0 keeps the
-            mean off the action bound, so exploration noise is not half clipped
-            from the first step. A prior, not a constraint.
+            It is the bias values in the start of the environment. Eg :
+            [0.5, 0.0] --> [half throttle, no turns] --> Head straight with slight
+            forward throttle
         tanh_mean: Pass the action mean through tanh, holding it inside the
-            ``[-1, 1]`` action bounds. The environment clips actions, so a mean
-            beyond a bound changes nothing the worm does and receives no
-            gradient pulling it back; v5's mean |action| drifted from 0.48 to
-            1.24 while its score fell from 1973 to 1256. Samples can still
-            land outside and are clipped as before. Every ``mean_bias_init``
-            entry must then lie strictly inside (-1, 1).
+            ``[-1, 1]`` action bounds. If not then we can get the values of
+            actions beyond what we expect. Eg : [2.5, ..] but we only accept
+            the throttle value of [-1, 1] now we will get some values of throttle
+            and the average will shift. So we constraint the values if required.
     """
 
     hidden_sizes: tuple[int, ...] = (64, 64)
@@ -86,13 +81,18 @@ class RolloutConfig:
         epochs: Update rounds in the run.
         gamma: Discount factor. Its horizon ``1/(1-gamma)`` must stay within a
             few multiples of the freeze lifespan, or eating changes ``V(s)`` by
-            too little to learn from.
-        gae_lambda: GAE lambda, trading advantage bias against variance.
+            too little to learn from. (PPO)
+        gae_lambda: GAE lambda, trading advantage bias against variance. configures
+            how far into the future the PPO looks when deciding the consequence
+            of the actions (worse / better) (PPO)
         frame_stack: Observation frames concatenated. Smell alone has no time
-            axis, so stacking is what turns "how much" into "more than before".
+            axis, so stacking is what turns "how much" into "more than before"
+            based on the sensors.
         normalize_observations: Track running mean and variance per channel.
             ``food_smell`` averages ~0.13 against sin/cos spanning [-1, 1], so
-            without this the signal that matters is the quietest input.
+            without this the signal that matters is the quietest input. It is
+            like normalising the features in a model or adding layer norms in
+            model architecture
     """
 
     steps_per_epoch: int = 4000
@@ -113,21 +113,26 @@ class RolloutConfig:
 
 @dataclass
 class OptimConfig:
-    """The PPO update itself.
+    """The PPO Optimizer update
 
     Attributes:
-        clip_ratio: Surrogate clipping range.
+        clip_ratio: Surrogate clipping range (PPO).
         policy_lr: Adam learning rate for the policy.
         value_lr: Adam learning rate for the critic.
         policy_iters: Maximum gradient steps on the policy per epoch.
         value_iters: Gradient steps on the critic per epoch.
         target_kl: Policy iterations stop early once the approximate KL exceeds
             1.5x this, past which the clipped surrogate stops approximating the
-            true objective.
-        entropy_coef: Weight on the entropy bonus. A departure from spinup,
-            which computes entropy for logging only; under a survival reward the
-            freeze policy is a strong early attractor. Set to 0.0 to match
-            spinup exactly.
+            true objective. Checks the KL divergence basically if KL exceeds
+            given value it starts with fresh experience from next run.
+        entropy_coef: Weight on the entropy bonus. A deviation from spinup,
+            which computes entropy for logging only. Under a survival reward the
+            freeze policy is a strong early attractor for our worm so in order to
+            keep just enough exploration this is another knob. Set to 0.0 to match
+            spinup exactly. In simple terms it is subtracted from the PPO loss
+            by this formula :
+            L = L_PPO - entropy_coef * H(pi)
+            Here, H(pi) : policy entropy calculated in our implementation
         max_grad_norm: Gradient-norm clip, or 0 to disable.
         anneal_lr: Scale both learning rates linearly from their full value on
             the first epoch to ``1/epochs`` of it on the last, as CleanRL's PPO
@@ -280,7 +285,9 @@ class RunConfig:
         if self.save_every < 1 or self.log_every < 1:
             raise ValueError("save_every and log_every must be >= 1")
         if self.eval_every < 0 or self.eval_episodes < 1:
-            raise ValueError("eval_every must be >= 0 (0 disables) and eval_episodes >= 1")
+            raise ValueError(
+                "eval_every must be >= 0 (0 disables) and eval_episodes >= 1"
+            )
 
 
 @dataclass

@@ -1,177 +1,75 @@
-# World v2 — point worm, food, and toxins.
-#
-# World v1 plus a second chemical sense. Everything about foraging is unchanged;
-# what is new is that some of the arena costs energy to occupy, and the worm can
-# smell it on a channel of its own.
-#
-#   uv run python scripts/train.py --env-config configs/world_v2.yaml --name toxins
-#
-# A complete file, like world_v1.yaml — every field is named (tests/test_env.py
-# enforces that), though a YAML passed to the env may be partial.
-#
-# NOTE: the toxin_smell channel widens the observation from 5 channels to 6
-# (20 -> 24 dims after frame stacking), so no world-v1 checkpoint can be
-# resumed into this. World v2 trains from scratch.
+# World v2: food foraging with sensed toxin hazards.
+# Its wider observation space is incompatible with v1 checkpoints.
 
 world:
   width: 20.0
   height: 20.0
-  dt: 0.1                 # seconds of simulated time per step
-  # "wrap" is a torus, where straight-line sweeping forages without sensing;
-  # "clamp" has walls, which the touch channel exists to perceive.
-  boundary: clamp
+  dt: 0.1                 # simulated seconds per step
+  boundary: clamp         # clamp | wrap
 
 worm:
-  max_speed: 2.0          # world units / second
-  max_turn_rate: 3.0      # radians / second
+  max_speed: 2.0          # world units per second
+  max_turn_rate: 3.0      # radians per second
   allow_reverse: true
-  # Drawn size only — read by the renderer and nothing else; eating uses
-  # food.eat_radius. This is the body's half-width at its thickest, so the
-  # drawn worm is 2 * radius across against render.worm_body_length long.
-  radius: 0.08
-  # Head sweep: the chemosensors ride on a head that swings sideways while
-  # the worm crawls, as the animal's does. A point sensor only reads
-  # cos(bearing), so food on the left and on the right smell identical; the
-  # sweep adds a cos(phase) * sin(bearing) term to the change in smell, which
-  # is the side information weathervane steering (klinotaxis) needs. Keep the
-  # amplitude well under the scent sigma (scent_radius * gaussian_sigma_scale)
-  # so the head samples a local slope. 0 makes the worm a point again.
+  radius: 0.08            # rendering only
   head_sweep_amplitude: 0.2
-  # Seconds per full left-right-left sweep; the animal's head swing is about
-  # 0.5-1 s. Must span at least 4 steps of world.dt to be sampled at all.
-  head_sweep_period: 0.8
+  head_sweep_period: 0.8  # seconds
 
 randomization:
-  # Multipliers on the nominal values above, redrawn every reset. The worm is
-  # never told what it drew, so no policy can bake in one exact calibration.
-  # Set enabled: false for fixed dynamics, e.g. when isolating a bug.
-  enabled: false 
+  enabled: false
   speed_scale: [0.75, 1.25]
   turn_rate_scale: [0.75, 1.25]
-  # Unlike the actuation draws this one is sensable — a denser world smells
-  # stronger everywhere — so scarcity can be searched for differently. Toxin
-  # count is deliberately NOT randomised: with two chemical fields varying at
-  # once, an episode's difficulty stops being attributable to either.
   food_count_scale: [0.5, 1.5]
 
 food:
   count: 10
-  eat_radius: 1.0         # contact radius; touch a pellet and it is eaten
-  scent_radius: 4.0       # sensory radius; must exceed eat_radius to be followable
-  scent_peak: 1.0         # concentration at a pellet's exact centre
+  eat_radius: 1.0
+  scent_radius: 4.0
+  scent_peak: 1.0
   scent_profile: gaussian # gaussian | linear | inverse_square
-  gaussian_sigma_scale: 0.35  # sigma as a fraction of scent_radius
-  # Eaten pellets reappear elsewhere, holding density constant. False depletes
-  # the world and caps lifespan regardless of policy.
+  gaussian_sigma_scale: 0.35
   respawn_on_eat: true
-  # Clearance kept between a new pellet and the worm, at reset and on respawn.
-  # Judge it against the scent sigma (gaussian_sigma_scale * scent_radius),
-  # not against eat_radius: past ~2 sigma the worm both starts every episode
-  # outside its own sensory range and respawns each meal out of range, which
-  # turns every episode's opening into a blind walk. At 2.0 this is ~1.4
-  # sigma, still twice eat_radius.
   min_spawn_distance: 2.0
 
 toxin:
-  # Damage is a dose, not a collision: energy lost per step is `damage` times
-  # the concentration sensed. Graded rather than binary, it arrives in the same
-  # step as the action that caused it — well inside the credit-assignment
-  # window — and it leaves a gradient to descend, where a contact hazard would
-  # be an invisible cliff edge.
-  #
-  # Size the field by how much of the arena actually costs something to be in,
-  # measured as the fraction where dose exceeds basal_cost:
-  #   count 8, radius 4.0 -> 37% of the arena
-  #   count 5, radius 3.0 -> 15% of the arena
-  #   count 4, radius 3.0 -> 12% of the arena
-  # 8 sources at food's own radius sounds balanced and is not: a third of the
-  # world is worse than open water and the safe policy is to stop foraging.
-  # At 5, avoidance is worth learning while foraging is still the main task.
-  count: 4  
-  # At full concentration this is 7.5x basal_cost, so sitting on a source burns
-  # a full worm in ~35 steps: harsh enough to matter, slow enough that the
-  # association is learnable rather than instantly fatal.
-  damage: 0.8 # Reduced from 1.5 to check if worm starts taking risk rather than be too scared 
-  # Tighter than food's 4.0, which is what keeps total coverage reasonable.
-  # Judge any change here by arena coverage, not by the number itself.
+  count: 4
+  damage: 0.8
   scent_radius: 3.0
   scent_peak: 1.0
   scent_profile: gaussian
   gaussian_sigma_scale: 0.35
-  min_spawn_distance: 3.0 # no episode opens already inside a hazard
+  min_spawn_distance: 3.0
 
 metabolism:
   max_energy: 100.0
   initial_energy: 40.0
-  # THE critical ratio: basal must dominate move, or freezing outlives foraging
-  # and training converges there. initial_energy / basal_cost is the freeze
-  # baseline, and toxins leave it intact: min_spawn_distance keeps hazards off
-  # the spawn point and a frozen worm never leaves it, so freeze measures 297
-  # against the formula's 300. Toxins tax movement, not stillness, which makes
-  # the baseline a slightly harder bar to clear than it looks.
-  basal_cost: 0.20
-  move_cost: 0.02         # multiplied by |action|^2
+  basal_cost: 0.20        # must dominate move cost to discourage freezing
+  move_cost: 0.02
   food_value: 25.0
-  min_speed_factor: 0.35  # a starving worm is slow, never frozen
-  speed_knee: 0.25        # above this energy fraction, speed is unimpaired
+  min_speed_factor: 0.35
+  speed_knee: 0.25
 
 reward:
-  survival: 1.0           # +1 per surviving step. This is the whole reward.
-  death_penalty: 0.0      # advantage normalisation removes it exactly; keep at 0
+  survival: 1.0
+  death_penalty: 0.0
 
 observation:
   include_energy: true
-  # Absolute scent concentration. Turn this off with include_smell_delta on to
-  # give the worm a purely phasic sense: it feels change and never level. That
-  # removes area-restricted search, which needs the level, and leaves
-  # klinokinesis as the only chemotactic strategy. Note the level is still
-  # partly inferable from the deltas (R^2 ~ 0.69), since a Gaussian's gradient
-  # magnitude scales with its height, so this makes ARS expensive rather than
-  # impossible.
   include_smell_level: true
-  # Step-to-step change in scent, on its own channel. Adds no information the
-  # frame stack lacks, but arrives at the same scale as the other channels
-  # instead of about 4x quieter. See configs/world_v1.yaml.
-  include_smell_delta: true 
-  # The v2 channel. Kept separate from food_smell deliberately: summed,
-  # food-beside-toxin is numerically identical to strong food; signed, the two
-  # cancel and the most dangerous spot in the arena reads as open water.
-  # Separate lines give the worm the ability to tell them apart, and leave it
-  # to learn which one is worth approaching. Set false, with count above left
-  # alone, for the toxin-blind control run.
+  include_smell_delta: true
   include_toxin: true
-  # Step-to-step change in toxin concentration, on its own channel, for the
-  # same scaling reason as include_smell_delta. Under the head sweep it also
-  # carries which side the toxin is on, so avoidance can steer rather than
-  # only reverse.
   include_toxin_delta: true
-  # Mechanosensation. Under boundary: clamp a wall is otherwise invisible — the
-  # worm cannot tell it has stopped moving, so it cannot learn to turn away.
-  # Constant 0 under wrap.
   include_touch: true
-  # Proprioception of the head sweep: sin and cos of its phase. Reading the
-  # side of the gradient out of the smell means knowing which way the head was
-  # swinging when it rose. Requires worm.head_sweep_amplitude above 0.
   include_head_phase: true
 
 render:
   window_size: 700
   fps: 30
-  # Draw what the simulation actually uses: pellets at their true eat_radius,
-  # contours on, and a ring on the point the physics integrates. Overrides
-  # show_scent_field and food_dot_scale. Scripts take --debug for this.
   debug: false
-  # Dotted iso-concentration rings, one per halving of concentration, so they
-  # crowd where the gradient is steep. Off in the clean look: they clutter the
-  # frame, and being per-pellet they cannot show the merged summits that
-  # matter. The two settings below only take effect when this is true.
   show_scent_field: false
   scent_contours: 3
   contour_dot_spacing: 14.0
-  food_dot_scale: 0.3     # clean-look pellet disc, as a fraction of eat_radius
-  # The drawn body, which is decoration over a point-mass simulation — none of
-  # this reaches the physics or the observation. The wave is locked to the path
-  # the point actually travelled, so the worm is still when it is still.
-  worm_body_length: 2.5   # world units, trailing back from the simulated point
-  worm_wave_amplitude: 0.35  # peak lateral swing; 0 draws it straight
-  worm_wavelength: 1.6    # undulation wavelength along the body
+  food_dot_scale: 0.12
+  worm_body_length: 2.5
+  worm_wave_amplitude: 0.35
+  worm_wavelength: 1.6

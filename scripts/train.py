@@ -6,14 +6,13 @@ which override the dataclass defaults. Each run writes both resolved configs,
 ``progress.csv`` and its checkpoints into ``experiments/<name>_s<seed>/``, and
 never overwrites an existing directory.
 
-The two configs have separate jobs: ``--env-config`` describes the world (arena,
-food, toxins, metabolism, and which channels the worm senses) while
-``--ppo-config`` describes the learner (network shape, discount, and the
-update). See :mod:`envs.config` and :mod:`ppo.config` for the schemas.
-
 Typical usage example:
 
-  uv run python scripts/train.py --env-config configs/world_v2.yaml --name toxins
+    uv run python scripts/train.py --env-config configs/world_v2.yaml --name toxins
+
+For command reference:
+
+    uv run python scripts/train.py --help
 """
 
 from __future__ import annotations
@@ -29,46 +28,78 @@ from common.cli import positive_int
 from ppo import PPOConfig, PPOTrainer
 from ppo.config import DEVICES
 
-# Used when the flags are omitted, so editing these files is enough to change a
-# run. Anchored to the repository rather than the working directory, so a run
-# started from elsewhere still finds them instead of silently falling back to
-# the dataclass defaults.
 DEFAULT_ENV_CONFIG = ROOT / "configs" / "world_v1.yaml"
 DEFAULT_PPO_CONFIG = ROOT / "configs" / "ppo.yaml"
 DEFAULT_EVAL_EPISODES = 10
 
-# Shown below the flag list by --help. This is operator guidance rather than a
-# description of the module, so it lives here instead of in the docstring: the
-# curriculum and --resume both make the task harder over time and are routinely
-# mistaken for one another.
+GREEN = "\033[32m"
+RESET = "\033[0m"
+
+NO_BRAIN_ART = r""" __          __               _______        _
+ \ \        / /              |__   __|      (_)
+  \ \  /\  / /__  _ __ _ __ ___ | |_ __ __ _ _ _ __   ___ _ __
+   \ \/  \/ / _ \| '__| '_ ` _ \| | '__/ _` | | '_ \ / _ \ '__|
+    \  /\  / (_) | |  | | | | | | | | | (_| | | | | |  __/ |
+     \/  \/ \___/|_|  |_| |_| |_|_|_|  \__,_|_|_| |_|\___|_|
+
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⠶⠞⠛⠛⠉⠉⠉⠉⠉⠙⠛⢦⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⠞⠉⠀⠀⠀⠆⠀⠀⠀⠀⠀⠀⠀⠀⠐⢹⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⢠⡾⠋⠀⠀⠀⠀⢀⣀⣤⣤⠴⠶⠶⠶⠶⠶⡶⡾⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⣴⠋⠀⠀⢀⡴⠾⠛⠉⠉⠀⠀⠀⠀⠀⠀⠀⣼⠁⠀⠀⠀⠀⠀
+⠀⠀⠀⢀⡼⠁⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡼⠃⠀⠀⠀⠀⠀⠀Train this....
+⠀⠀⢀⡼⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡇⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⣼⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⠀⠀⠀⠀⠀⠀⠀
+⠀⢠⡇⠀⠀⠀⠀⠀⠀⠀⠀⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⡇⠀⠀⠀⠀⠀⠀⠀
+⠀⣸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣆⠀⠀⠀⠀⠀⠀⠀⢀⡇⠀⣰⣏🧠⣀⣀
+⠀⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣆⠀⠀⠀⠀⠀⠀⢸⡇⣠⠏⠉⠛⠛⠋⠁
+⢀⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⡄⠀⠀⠀⠀⠀⢸⣿⠋⠀⠀⠀⠀⠀⠀
+⢸⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⡄⠀⠀⠀⠀⣼⡇⠀⠀⠀⠀⠀⠀⠀
+⣼⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⡀⠀⠀⣼⠃⣧⠀⠀⠀⠀⠀⠀⠀"""
+
+
+class _TrainArgumentParser(argparse.ArgumentParser):
+    def format_help(self) -> str:
+        return f"{GREEN}{NO_BRAIN_ART}{RESET}\n\n{super().format_help()}"
+
+
 EPILOG = """\
-two ways the task gets harder:
+MAKING TRAINING HARDER
+----------------------
 
-  The curriculum (the `curriculum` section of the PPO config) anneals the
-  world within a single run, from its *_start values toward whatever the env
-  config specifies. It needs nothing on the command line and happens on its
-  own whenever it is enabled.
+Curriculum: make one run harder over time
+  Enable `curriculum` in the PPO config. Training starts with the *_start
+  settings and gradually moves toward the environment config. No command-line
+  option is needed.
 
-  --resume continues one run's weights in a new run, against whatever world
-  --env-config names. Use it for a handoff the curriculum cannot express: a
-  different boundary, a retuned metabolism, or more epochs on a plateau.
+Resume: continue training in a new run
+  Use --resume to load weights from a checkpoint. The new run uses the world
+  from --env-config. Use this to change the boundary or metabolism, or to keep
+  training after progress has stopped.
+
+  Example:
 
     uv run python scripts/train.py --env-config configs/world_v1.yaml --name easy
     uv run python scripts/train.py --env-config configs/world_v1.yaml --name hard \\
         --resume experiments/easy_s0/checkpoints/latest.pt
 
-  Resume works only when the observation width matches. Weights are a matrix
-  sized to the input, so a checkpoint cannot be loaded into a run that senses
-  a different number of things. Changing frame_stack or any
-  observation.include_* flag, which is what separates world v1 from world v2,
-  means training from scratch. The run fails immediately and says so rather
-  than loading something mismatched.
+WHEN RESUME WILL NOT WORK
+-------------------------
 
-watch a finished run:
+The checkpoint and the new world must use the same observation width. Train
+from scratch after changing frame_stack or an observation.include_* setting.
+This means you cannot resume a world v1 checkpoint in world v2. The command
+stops with an error when the widths do not match.
+
+WATCH A TRAINED WORM
+--------------------
 
   uv run python scripts/watch.py experiments/<run>/checkpoints/best.pt
 
-every script and its flags: scripts/README.md
+MORE HELP
+---------
+
+  See scripts/README.md for all scripts and options.
 """
 
 
@@ -95,7 +126,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """
     # Raw, so the line breaks in the docstring and the epilog survive into
     # --help; argparse otherwise reflows both into single paragraphs.
-    parser = argparse.ArgumentParser(
+    parser = _TrainArgumentParser(
         description=__doc__,
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -103,46 +134,49 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--env-config",
         default=_default(DEFAULT_ENV_CONFIG),
-        help="YAML for the world (default: configs/world_v1.yaml if present)",
+        help="world config file (default: configs/world_v1.yaml if present)",
     )
     parser.add_argument(
         "--ppo-config",
         default=_default(DEFAULT_PPO_CONFIG),
-        help="YAML for the hyperparameters (default: configs/ppo.yaml if present)",
+        help="training config file (default: configs/ppo.yaml if present)",
     )
-    parser.add_argument("--name", default=None, help="run name (default: from config)")
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--epochs", type=positive_int, default=None)
-    parser.add_argument("--steps-per-epoch", type=positive_int, default=None)
-    parser.add_argument("--device", default=None, choices=DEVICES)
+    parser.add_argument(
+        "--name", default=None, help="name for this run (default: from config)"
+    )
+    parser.add_argument("--seed", type=int, default=None, help="random seed")
+    parser.add_argument(
+        "--epochs", type=positive_int, default=None, help="number of epochs"
+    )
+    parser.add_argument(
+        "--steps-per-epoch", type=positive_int, default=None, help="steps in each epoch"
+    )
+    parser.add_argument(
+        "--device", default=None, choices=DEVICES, help="device to train on"
+    )
     parser.add_argument(
         "--resume",
         default=None,
         metavar="CHECKPOINT",
-        help="continue from a checkpoint's weights in a new run directory, leaving the "
-        "original alone. The world comes from --env-config, not from the checkpoint, so "
-        "the two can differ — but only if they produce the same observation width. "
-        "Adding or removing an observation channel means training from scratch.",
+        help="start a new run with weights from a checkpoint. The new run uses "
+        "--env-config. The observation width must match the checkpoint.",
     )
     parser.add_argument(
         "--reset-optimizers",
         action="store_true",
-        help="with --resume, start Adam fresh instead of restoring its moment estimates. "
-        "Those moments summarise recent gradients, so they help when continuing the same "
-        "task and mislead when the new world makes them describe a task that no longer exists.",
+        help="with --resume, reset the Adam optimizers instead of loading them from the "
+        "checkpoint",
     )
-    # None rather than the real default: argparse's mutual-exclusion check
-    # ignores a value identical to the default, so `--no-eval --eval-episodes
-    # 10` would otherwise be accepted.
+    # To add case for conflicted args : if one is present no one can use other
     evaluation = parser.add_mutually_exclusive_group()
     evaluation.add_argument(
         "--eval-episodes",
         type=positive_int,
         default=None,
-        help=f"deterministic episodes to run after training (default: {DEFAULT_EVAL_EPISODES})",
+        help=f"test episodes to run after training (default: {DEFAULT_EVAL_EPISODES})",
     )
     evaluation.add_argument(
-        "--no-eval", action="store_true", help="skip the evaluation after training"
+        "--no-eval", action="store_true", help="do not test after training"
     )
     return parser.parse_args(argv)
 
@@ -181,7 +215,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     config = resolve_config(args)
 
-    print(f"env config: {args.env_config or '<defaults>'}   ppo config: {args.ppo_config or '<defaults>'}")
+    print(
+        f"env config: {args.env_config or '<defaults>'}   ppo config: {args.ppo_config or '<defaults>'}"
+    )
     trainer = PPOTrainer(env_config=args.env_config, ppo_config=config)
     if config.curriculum.enabled:
         target, start = trainer.target_env_config.food, trainer.env_config.food
@@ -198,12 +234,19 @@ def main(argv: list[str] | None = None) -> None:
             f"(epoch {trainer.epoch}, {trainer.total_steps:,} prior env steps"
             f"{', optimizers reset' if args.reset_optimizers else ''})"
         )
+    print(f"{GREEN}{NO_BRAIN_ART}{RESET}")
     run_dir = trainer.run()
 
     if not args.no_eval:
         summary = trainer.evaluate(episodes=args.eval_episodes or DEFAULT_EVAL_EPISODES)
         print("\ndeterministic evaluation:")
-        for key in ("lifespan_mean", "lifespan_min", "lifespan_max", "eaten_mean", "death_rate"):
+        for key in (
+            "lifespan_mean",
+            "lifespan_min",
+            "lifespan_max",
+            "eaten_mean",
+            "death_rate",
+        ):
             print(f"  {key:16s} {summary[key]:.2f}")
     print(f"\nrun saved to {run_dir}")
 
