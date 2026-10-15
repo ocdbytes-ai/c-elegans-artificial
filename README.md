@@ -19,12 +19,10 @@ A point worm in a 20 × 20 arena eats pellets to keep its energy up and avoids t
 |---|---|---|
 | freeze | 199 | 0 |
 | straight | 230 | 0.6 |
-| **trained** | **2031** | **23** |
+| **trained (mean for 100 runs)** | **3573** | **33** |
 | greedy (knows pellet positions) | 4000 (cap) | 219 |
 
 **Emerged behaviour:** klinokinesis for food and toxins, and klinotaxis after the head sweep was added.
-
-**Next:** fix the decline after the training peak (`tanh_mean`, `anneal_lr` in `configs/ppo.yaml`).
 
 ## Quick start
 

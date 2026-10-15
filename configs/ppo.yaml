@@ -23,7 +23,7 @@ rollout:
   normalize_observations: true
 
 optim:
-  clip_ratio: 0.5
+  clip_ratio: 0.2
   policy_lr: 0.0003
   value_lr: 0.001
   policy_iters: 80        # upper bound; target_kl usually stops it sooner
@@ -53,5 +53,5 @@ run:
   save_every: 10
   log_every: 1
   # Evaluate on the target world with fixed seeds; 0 disables it.
-  eval_every: 25
-  eval_episodes: 20
+  eval_every: 50
+  eval_episodes: 100
