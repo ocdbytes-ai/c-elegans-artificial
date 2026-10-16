@@ -195,6 +195,7 @@ def test_partial_config_overrides_only_what_it_names():
             "must cover at least 4 steps",
         ),
         ({"observation": {"include_head_phase": True}}, "include_head_phase needs"),
+        ({"food": {"eating": "sometimes"}}, "eating must be one of"),
     ],
 )
 def test_bad_config_is_rejected(overrides, message):
@@ -383,6 +384,33 @@ def test_energy_is_capped_at_max():
     assert env.metabolism.energy <= env.config.metabolism.max_energy
 
 
+def test_satiety_leaves_a_pellet_that_would_overfill():
+    env = _single_pellet_env(min_spawn_distance=0.0, eating="satiety")
+    env.food.positions[0] = env.worm.position.copy()
+
+    env.metabolism.energy = env.config.metabolism.max_energy
+    _, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
+    assert info["food_eaten"] == 0
+
+    env.metabolism.energy = 40.0
+    _, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
+    assert info["food_eaten"] == 1
+
+
+def test_eat_command_decides_and_costs_nothing():
+    env = _single_pellet_env(min_spawn_distance=0.0, eating="action")
+    assert env.action_space.shape == (3,)
+    env.metabolism.energy = 40.0
+    env.food.positions[0] = env.worm.position.copy()
+
+    _, _, _, _, info = env.step(np.array([0.0, 0.0, -1.0], dtype=np.float32))
+    assert info["food_eaten"] == 0
+    assert info["move_cost"] == 0.0, "the eat command is not locomotion"
+
+    _, _, _, _, info = env.step(np.array([0.0, 0.0, 1.0], dtype=np.float32))
+    assert info["food_eaten"] == 1
+
+
 def test_starvation_terminates_and_reward_counts_surviving_steps():
     env = _fixed_env(count=1, scent_radius=0.5, eat_radius=0.01)
     env.reset(seed=11)
@@ -448,9 +476,11 @@ def test_wrap_keeps_the_worm_in_bounds_and_clamp_stops_it():
             assert np.all(env.worm.position <= np.array(env.config.world.size))
 
 
-def test_rendered_frame_uses_the_retro_cyan_palette():
+def test_rendered_frame_is_a_dot_matrix_of_lit_and_unlit_pixels():
     os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
-    env = WormWorldEnv(render_mode="rgb_array")
+    from envs import rendering  # imported here: pygame is only needed to render
+
+    env = WormWorldEnv(render_mode="rgb_array", config={"render": {"debug": True}})
     env.reset(seed=4)
     for _ in range(15):
         env.step(np.array([0.2, 1.0], dtype=np.float32))
@@ -459,9 +489,10 @@ def test_rendered_frame_uses_the_retro_cyan_palette():
     env.close()
 
     assert frame.shape == (700, 700, 3)
-    assert frame.mean() < 20, "the display should stay mostly dark"
-    cyan = (frame[..., 2] > 150) & (frame[..., 1] > frame[..., 0] * 2)
-    assert cyan.any(), "world objects and the HUD should glow cyan"
+    colours = {tuple(colour) for colour in np.unique(frame.reshape(-1, 3), axis=0).tolist()}
+    assert colours == {rendering.BACKGROUND, rendering.PIXEL_OFF, rendering.PIXEL_ON}
+    lit = np.all(frame == rendering.PIXEL_ON, axis=-1)
+    assert lit.mean() < 0.2, "the display should stay mostly unlit"
 
 
 def test_minimum_image_displacement_takes_the_short_way():

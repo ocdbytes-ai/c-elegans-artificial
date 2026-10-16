@@ -29,6 +29,9 @@ food:
   gaussian_sigma_scale: 0.35
   respawn_on_eat: true
   min_spawn_distance: 2.0
+  # auto: always eat a touched pellet. satiety: skip it while a whole pellet
+  # would overfill the worm. action: a third action entry decides.
+  eating: auto
 
 toxin:
   count: 0                # disables hazards in v1

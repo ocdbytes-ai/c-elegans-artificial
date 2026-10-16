@@ -104,4 +104,12 @@ Result should be  :
 
 The run has actually improved and worm has learned to scavange properly instead of just randomly heading with some learned behaviour. It's awesome !! 
 
+## Stage 5 
 
+So today I added another behaviour to the worm which is whether it needs the food or not. So earlier we were allowing the worm to search for food using chemical channels and it eats everytime and that is not biologically correct so I added a behaviours for food consumption. 
+
+- auto : eats food everytime (how it was being done earlier)
+- satiety : learns if it needs to eat the food or not 
+- action : gets a neural network output for action to eat
+
+satiety is the most biologically closer thing to what the worm does when it encounters food in reality. So I trained on satiety for 1000 epochs and the worm successfully learned how and when to consume the food. so that was cool. 

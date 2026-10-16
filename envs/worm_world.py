@@ -33,7 +33,9 @@ class WormWorldEnv(gym.Env):
     The action is ``Box(-1, 1, (2,))`` holding ``[turn, throttle]``, each a
     fraction of the corresponding configured ceiling. Positive turn is
     anticlockwise, zero holds the heading; negative throttle reverses, which
-    real *C. elegans* does as part of the pirouette.
+    real *C. elegans* does as part of the pirouette. Under ``food.eating:
+    action`` the box is ``(3,)`` and the third entry is an eat command: a
+    touched pellet is eaten only when it is positive.
 
     The observation is set by ``config.observation``; read
     ``env.unwrapped.observation_labels`` for the live layout.
@@ -93,7 +95,8 @@ class WormWorldEnv(gym.Env):
         self._observation = ObservationBuilder(self.config)
         self._renderer: Any | None = None
 
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        width = 3 if self.config.food.eating == "action" else 2
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(width,), dtype=np.float32)
         self.observation_space = self._observation.space
         self.steps = 0
         self._previous_food_smell = 0.0
@@ -138,19 +141,27 @@ class WormWorldEnv(gym.Env):
         """Advances the simulation by one step.
 
         Args:
-            action: ``[turn, throttle]``; values outside ``[-1, 1]`` are clipped.
+            action: ``[turn, throttle]``, plus the eat command under
+                ``food.eating: action``; values outside ``[-1, 1]`` are clipped.
 
         Returns:
             The Gymnasium 5-tuple. Truncation is always False here and is
             supplied by the ``TimeLimit`` wrapper from the registration.
         """
         action = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
+        # ponytail: eating is free; charge the eat command here if pumping
+        # cost ever matters.
+        locomotion = action[:2]
 
         # Pay first, move second: an action costs energy whether or not the worm
         # has enough left to complete it.
-        self.metabolism.spend(action)
-        move = self.worm.step(action, speed_factor=self.metabolism.speed_factor)
-        eaten = self.food.consume(self.worm.position, self.np_random)
+        self.metabolism.spend(locomotion)
+        move = self.worm.step(locomotion, speed_factor=self.metabolism.speed_factor)
+        eaten = (
+            self.food.consume(self.worm.position, self.np_random)
+            if self._wants_to_eat(action)
+            else 0
+        )
         self.metabolism.eat(eaten)
         # Dosed after moving, so the cost reflects where the action landed the
         # worm rather than where it set off from. Dosed at the body, not the
@@ -207,6 +218,23 @@ class WormWorldEnv(gym.Env):
         if self._renderer is not None:
             self._renderer.close()
             self._renderer = None
+
+    def _wants_to_eat(self, action: np.ndarray) -> bool:
+        """Decides whether a touched pellet is eaten this step.
+
+        Args:
+            action: The clipped action. Its third entry is the eat command
+                under ``food.eating: action``.
+
+        Returns:
+            True when ``food.eating`` allows eating now.
+        """
+        eating = self.config.food.eating
+        if eating == "satiety":
+            return self.metabolism.has_room
+        if eating == "action":
+            return bool(action[2] > 0.0)
+        return True
 
     def _observe(self) -> np.ndarray:
         """Reads the current observation and remembers this step's scents."""

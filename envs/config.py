@@ -11,6 +11,7 @@ from common import config_io
 
 BOUNDARIES = ("wrap", "clamp")
 SCENT_PROFILES = ("gaussian", "linear", "inverse_square")
+EATING_MODES = ("auto", "satiety", "action")
 
 
 @dataclass
@@ -165,6 +166,11 @@ class FoodConfig:
             ``(initial_energy + count * food_value) / basal_cost`` regardless of
             policy, and forcing an exploration/exploitation trade-off.
         min_spawn_distance: Clearance kept between new pellets and the worm.
+        eating: One of :data:`EATING_MODES`, deciding whether a touched pellet
+            is eaten. ``auto`` always eats. ``satiety`` leaves a pellet alone
+            while a whole one would overfill the worm, a fixed rule like the
+            worm's hormonal satiety. ``action`` adds a third action entry and
+            eats only when it is positive, so the policy must learn when to.
     """
 
     count: int = 8
@@ -175,6 +181,7 @@ class FoodConfig:
     gaussian_sigma_scale: float = 0.35
     respawn_on_eat: bool = True
     min_spawn_distance: float = 2.0
+    eating: str = "auto"
 
     def __post_init__(self) -> None:
         if self.count < 1:
@@ -183,6 +190,8 @@ class FoodConfig:
             raise ValueError(
                 f"scent_profile must be one of {SCENT_PROFILES}, got {self.scent_profile!r}"
             )
+        if self.eating not in EATING_MODES:
+            raise ValueError(f"eating must be one of {EATING_MODES}, got {self.eating!r}")
         if self.eat_radius <= 0 or self.scent_radius <= 0:
             raise ValueError("eat_radius and scent_radius must be positive")
         if self.eat_radius > self.scent_radius:

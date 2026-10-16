@@ -30,6 +30,9 @@ food:
   gaussian_sigma_scale: 0.35
   respawn_on_eat: true
   min_spawn_distance: 2.0
+  # auto: always eat a touched pellet. satiety: skip it while a whole pellet
+  # would overfill the worm. action: a third action entry decides.
+  eating: satiety
 
 toxin:
   count: 4
@@ -42,7 +45,7 @@ toxin:
 
 metabolism:
   max_energy: 100.0
-  initial_energy: 40.0
+  initial_energy: 70.0
   basal_cost: 0.20        # must dominate move cost to discourage freezing
   move_cost: 0.02
   food_value: 25.0
