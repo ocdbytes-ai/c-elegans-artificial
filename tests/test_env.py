@@ -196,6 +196,7 @@ def test_partial_config_overrides_only_what_it_names():
         ),
         ({"observation": {"include_head_phase": True}}, "include_head_phase needs"),
         ({"food": {"eating": "sometimes"}}, "eating must be one of"),
+        ({"food": {"patches": -1}}, "food.patches must be >= 0"),
     ],
 )
 def test_bad_config_is_rejected(overrides, message):
@@ -374,6 +375,32 @@ def test_world_can_be_emptied_when_food_does_not_respawn():
     assert info["food_smell"] == 0.0
     assert info["nearest_food_distance"] == float("inf")
     assert env.food.nearest(env.worm.position)[0] == -1
+
+
+def test_patches_cluster_pellets_around_their_centres():
+    env = _fixed_env(count=7, patches=3, patch_spread=0.5)
+    env.reset(seed=0)
+    assert env.food.patch_sizes == [3, 2, 2]
+    for patch in range(3):
+        pellets = env.food.positions[env.food.patch_of == patch]
+        assert np.linalg.norm(pellets - pellets.mean(axis=0), axis=1).max() < 5 * 0.5
+
+
+def test_a_patch_is_replaced_only_once_its_last_pellet_is_eaten():
+    env = _fixed_env(count=4, patches=2)
+    env.reset(seed=0)
+    env.worm.position = np.array([10.0, 10.0])
+    env.food.positions[:] = np.array([[10.0, 10.0], [2.0, 2.0], [18.0, 2.0], [18.0, 18.0]])
+    env.food.patch_of[:] = [0, 0, 1, 1]
+
+    env.step(np.zeros(2, dtype=np.float32))
+    assert env.food.count == 3, "an eaten pellet is not replaced while its patch lasts"
+    assert sorted(env.food.patch_of) == [0, 1, 1]
+
+    env.food.positions[env.food.patch_of == 0] = env.worm.position
+    env.step(np.zeros(2, dtype=np.float32))
+    assert env.food.count == 4, "the emptied patch reappears whole"
+    assert sorted(env.food.patch_of) == [0, 0, 1, 1]
 
 
 def test_energy_is_capped_at_max():

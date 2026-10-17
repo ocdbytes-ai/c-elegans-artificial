@@ -164,8 +164,16 @@ class FoodConfig:
             density constant so the world can sustain a worm indefinitely. False
             depletes the world, capping lifespan at
             ``(initial_energy + count * food_value) / basal_cost`` regardless of
-            policy, and forcing an exploration/exploitation trade-off.
+            policy, and forcing an exploration/exploitation trade-off. Under
+            ``patches`` a patch is replaced only once its last pellet is eaten.
         min_spawn_distance: Clearance kept between new pellets and the worm.
+            Under ``patches`` it applies to the patch centre.
+        patches: 0 scatters pellets uniformly. N > 0 groups them into N patches,
+            like bacterial lawns: food is clumped, so finding one pellet means
+            more are near. An eaten pellet is not replaced in its patch; a fully
+            eaten patch reappears whole at a new random spot.
+        patch_spread: Standard deviation of a pellet's offset from its patch
+            centre, in world units.
         eating: One of :data:`EATING_MODES`, deciding whether a touched pellet
             is eaten. ``auto`` always eats. ``satiety`` leaves a pellet alone
             while a whole one would overfill the worm, a fixed rule like the
@@ -181,11 +189,17 @@ class FoodConfig:
     gaussian_sigma_scale: float = 0.35
     respawn_on_eat: bool = True
     min_spawn_distance: float = 2.0
+    patches: int = 0
+    patch_spread: float = 1.0
     eating: str = "auto"
 
     def __post_init__(self) -> None:
         if self.count < 1:
             raise ValueError("food.count must be >= 1")
+        # Not checked against count: the curriculum and randomisation shrink
+        # count at runtime, and FoodField caps patches at the pellets drawn.
+        if self.patches < 0 or self.patch_spread <= 0:
+            raise ValueError("food.patches must be >= 0 and food.patch_spread > 0")
         if self.scent_profile not in SCENT_PROFILES:
             raise ValueError(
                 f"scent_profile must be one of {SCENT_PROFILES}, got {self.scent_profile!r}"

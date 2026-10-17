@@ -29,6 +29,10 @@ food:
   gaussian_sigma_scale: 0.35
   respawn_on_eat: true
   min_spawn_distance: 2.0
+  # 0 scatters pellets uniformly. N groups them into N patches, like bacterial
+  # lawns; a fully eaten patch reappears whole somewhere else.
+  patches: 0
+  patch_spread: 1.0       # std dev of a pellet's offset from its patch centre
   # auto: always eat a touched pellet. satiety: skip it while a whole pellet
   # would overfill the worm. action: a third action entry decides.
   eating: auto

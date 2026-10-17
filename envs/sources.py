@@ -140,6 +140,9 @@ class FoodField(ScentField):
         randomization: Per-episode spread on the pellet count.
         initial_count: Pellets drawn at the last reset, before any were eaten.
         eaten_total: Pellets eaten so far this episode.
+        patch_of: Patch index of each live pellet, aligned with ``positions``.
+            All zeros when ``patches`` is 0.
+        patch_sizes: Pellets each patch starts with, indexed by patch.
     """
 
     def __init__(
@@ -157,9 +160,28 @@ class FoodField(ScentField):
         self.randomization = randomization
         self.initial_count = config.count
         self.eaten_total = 0
+        self.patch_of = np.zeros(config.count, dtype=np.int64)
+        self.patch_sizes: list[int] = []
+
+    def _patch(
+        self, rng: np.random.Generator, count: int, exclude: np.ndarray
+    ) -> np.ndarray:
+        """Draws one patch: a centre clear of a point, pellets spread around it.
+
+        Args:
+            rng: Source of randomness, owned by the environment.
+            count: Pellets in the patch.
+            exclude: Position to keep the centre clear of.
+
+        Returns:
+            Positions of shape ``(count, 2)``, kept inside the arena.
+        """
+        centre = self._scatter(rng, 1, exclude)[0]
+        offsets = rng.normal(0.0, self.config.patch_spread, size=(count, 2))
+        return geometry.apply_boundary(centre + offsets, self.world.size, self.world.boundary)
 
     def reset(self, rng: np.random.Generator, worm_position: np.ndarray) -> None:
-        """Draws this episode's pellet count and scatters them clear of the worm.
+        """Draws this episode's pellet count and places them clear of the worm.
 
         Args:
             rng: Source of randomness, owned by the environment.
@@ -167,14 +189,24 @@ class FoodField(ScentField):
         """
         low, high = self.randomization.food_count_bounds(self.config.count)
         self.initial_count = int(rng.integers(low, high + 1))
-        self.positions = self._scatter(rng, self.initial_count, worm_position)
         self.eaten_total = 0
+        if not self.config.patches:
+            self.positions = self._scatter(rng, self.initial_count, worm_position)
+            self.patch_of = np.zeros(self.initial_count, dtype=np.int64)
+            return
+        patches = min(self.config.patches, self.initial_count)
+        self.patch_sizes = [len(group) for group in np.array_split(np.arange(self.initial_count), patches)]
+        self.positions = np.concatenate(
+            [self._patch(rng, size, worm_position) for size in self.patch_sizes]
+        )
+        self.patch_of = np.repeat(np.arange(len(self.patch_sizes)), self.patch_sizes)
 
     def consume(self, position: np.ndarray, rng: np.random.Generator) -> int:
         """Eats every pellet within ``eat_radius`` of a position.
 
         Eaten pellets either respawn elsewhere or are removed permanently,
-        depending on ``respawn_on_eat``.
+        depending on ``respawn_on_eat``. Under ``patches`` they are removed, and
+        a patch whose last pellet went is redrawn whole at a new spot.
 
         Args:
             position: The worm's position.
@@ -192,10 +224,17 @@ class FoodField(ScentField):
             return 0
 
         self.eaten_total += count
-        if self.config.respawn_on_eat:
+        if self.config.respawn_on_eat and not self.config.patches:
             self.positions[eaten] = self._scatter(rng, count, position)
-        else:
-            self.positions = self.positions[~eaten]
+            return count
+
+        emptied = np.setdiff1d(self.patch_of[eaten], self.patch_of[~eaten])
+        self.positions, self.patch_of = self.positions[~eaten], self.patch_of[~eaten]
+        if self.config.respawn_on_eat:
+            for patch in emptied:
+                size = self.patch_sizes[patch]
+                self.positions = np.concatenate([self.positions, self._patch(rng, size, position)])
+                self.patch_of = np.concatenate([self.patch_of, np.full(size, patch)])
         return count
 
 
